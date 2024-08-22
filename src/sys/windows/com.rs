@@ -14,9 +14,10 @@ use winapi::um::winnt::{
 };
 
 use crate::sys::windows::dcb;
+use crate::windows::{CommTimeouts, SerialPortExt};
 use crate::{
-    ClearBuffer, DataBits, Error, ErrorKind, FlowControl, Parity, Result,
-    SerialPortBuilder, StopBits,
+    ClearBuffer, DataBits, Error, ErrorKind, FlowControl, Parity, Result, SerialPortBuilder,
+    StopBits,
 };
 
 /// A serial port implementation for Windows COM ports
@@ -105,7 +106,7 @@ impl SerialPort {
     /// # Errors
     ///
     /// This function returns an error if the serial port couldn't be cloned.
-    pub fn try_clone_native(&self) -> Result<SerialPort> {
+    pub fn try_clone(&self) -> Result<SerialPort> {
         let process_handle: HANDLE = unsafe { GetCurrentProcess() };
         let mut cloned_handle: HANDLE = INVALID_HANDLE_VALUE;
         unsafe {
@@ -167,6 +168,202 @@ impl SerialPort {
         // and non-monotonic timeouts from cutting off the higher bits.
         u128::min(milliseconds, MAXDWORD as u128 - 1) as DWORD
     }
+
+    pub fn name(&self) -> Option<String> {
+        self.port_name.clone()
+    }
+
+    pub fn timeout(&self) -> Duration {
+        self.timeout
+    }
+
+    pub fn set_timeout(&mut self, timeout: Duration) -> Result<()> {
+        let timeout_constant = Self::timeout_constant(timeout);
+
+        let mut timeouts = COMMTIMEOUTS {
+            ReadIntervalTimeout: MAXDWORD,
+            ReadTotalTimeoutMultiplier: MAXDWORD,
+            ReadTotalTimeoutConstant: timeout_constant,
+            WriteTotalTimeoutMultiplier: 0,
+            WriteTotalTimeoutConstant: timeout_constant,
+        };
+
+        if unsafe { SetCommTimeouts(self.handle, &mut timeouts) } == 0 {
+            return Err(super::error::last_os_error());
+        }
+
+        self.timeout = timeout;
+        Ok(())
+    }
+
+    pub fn write_request_to_send(&mut self, level: bool) -> Result<()> {
+        if level {
+            self.escape_comm_function(SETRTS)
+        } else {
+            self.escape_comm_function(CLRRTS)
+        }
+    }
+
+    pub fn write_data_terminal_ready(&mut self, level: bool) -> Result<()> {
+        if level {
+            self.escape_comm_function(SETDTR)
+        } else {
+            self.escape_comm_function(CLRDTR)
+        }
+    }
+
+    pub fn read_clear_to_send(&mut self) -> Result<bool> {
+        self.read_pin(MS_CTS_ON)
+    }
+
+    pub fn read_data_set_ready(&mut self) -> Result<bool> {
+        self.read_pin(MS_DSR_ON)
+    }
+
+    pub fn read_ring_indicator(&mut self) -> Result<bool> {
+        self.read_pin(MS_RING_ON)
+    }
+
+    pub fn read_carrier_detect(&mut self) -> Result<bool> {
+        self.read_pin(MS_RLSD_ON)
+    }
+
+    pub fn baud_rate(&self) -> Result<u32> {
+        let dcb = dcb::get_dcb(self.handle)?;
+        Ok(dcb.BaudRate as u32)
+    }
+
+    pub fn data_bits(&self) -> Result<DataBits> {
+        let dcb = dcb::get_dcb(self.handle)?;
+        match dcb.ByteSize {
+            5 => Ok(DataBits::Five),
+            6 => Ok(DataBits::Six),
+            7 => Ok(DataBits::Seven),
+            8 => Ok(DataBits::Eight),
+            _ => Err(Error::new(
+                ErrorKind::Unknown,
+                "Invalid data bits setting encountered",
+            )),
+        }
+    }
+
+    pub fn parity(&self) -> Result<Parity> {
+        let dcb = dcb::get_dcb(self.handle)?;
+        match dcb.Parity {
+            ODDPARITY => Ok(Parity::Odd),
+            EVENPARITY => Ok(Parity::Even),
+            NOPARITY => Ok(Parity::None),
+            _ => Err(Error::new(
+                ErrorKind::Unknown,
+                "Invalid parity bits setting encountered",
+            )),
+        }
+    }
+
+    pub fn stop_bits(&self) -> Result<StopBits> {
+        let dcb = dcb::get_dcb(self.handle)?;
+        match dcb.StopBits {
+            TWOSTOPBITS => Ok(StopBits::Two),
+            ONESTOPBIT => Ok(StopBits::One),
+            _ => Err(Error::new(
+                ErrorKind::Unknown,
+                "Invalid stop bits setting encountered",
+            )),
+        }
+    }
+
+    pub fn flow_control(&self) -> Result<FlowControl> {
+        let dcb = dcb::get_dcb(self.handle)?;
+        if dcb.fOutxCtsFlow() != 0 || dcb.fRtsControl() != 0 {
+            Ok(FlowControl::Hardware)
+        } else if dcb.fOutX() != 0 || dcb.fInX() != 0 {
+            Ok(FlowControl::Software)
+        } else {
+            Ok(FlowControl::None)
+        }
+    }
+
+    pub fn set_baud_rate(&mut self, baud_rate: u32) -> Result<()> {
+        let mut dcb = dcb::get_dcb(self.handle)?;
+        dcb::set_baud_rate(&mut dcb, baud_rate);
+        dcb::set_dcb(self.handle, dcb)
+    }
+
+    pub fn set_data_bits(&mut self, data_bits: DataBits) -> Result<()> {
+        let mut dcb = dcb::get_dcb(self.handle)?;
+        dcb::set_data_bits(&mut dcb, data_bits);
+        dcb::set_dcb(self.handle, dcb)
+    }
+
+    pub fn set_parity(&mut self, parity: Parity) -> Result<()> {
+        let mut dcb = dcb::get_dcb(self.handle)?;
+        dcb::set_parity(&mut dcb, parity);
+        dcb::set_dcb(self.handle, dcb)
+    }
+
+    pub fn set_stop_bits(&mut self, stop_bits: StopBits) -> Result<()> {
+        let mut dcb = dcb::get_dcb(self.handle)?;
+        dcb::set_stop_bits(&mut dcb, stop_bits);
+        dcb::set_dcb(self.handle, dcb)
+    }
+
+    pub fn set_flow_control(&mut self, flow_control: FlowControl) -> Result<()> {
+        let mut dcb = dcb::get_dcb(self.handle)?;
+        dcb::set_flow_control(&mut dcb, flow_control);
+        dcb::set_dcb(self.handle, dcb)
+    }
+
+    pub fn bytes_to_read(&self) -> Result<u32> {
+        let mut errors: DWORD = 0;
+        let mut comstat = MaybeUninit::uninit();
+
+        if unsafe { ClearCommError(self.handle, &mut errors, comstat.as_mut_ptr()) != 0 } {
+            unsafe { Ok(comstat.assume_init().cbInQue) }
+        } else {
+            Err(super::error::last_os_error())
+        }
+    }
+
+    pub fn bytes_to_write(&self) -> Result<u32> {
+        let mut errors: DWORD = 0;
+        let mut comstat = MaybeUninit::uninit();
+
+        if unsafe { ClearCommError(self.handle, &mut errors, comstat.as_mut_ptr()) != 0 } {
+            unsafe { Ok(comstat.assume_init().cbOutQue) }
+        } else {
+            Err(super::error::last_os_error())
+        }
+    }
+
+    pub fn clear(&self, buffer_to_clear: ClearBuffer) -> Result<()> {
+        let buffer_flags = match buffer_to_clear {
+            ClearBuffer::Input => PURGE_RXABORT | PURGE_RXCLEAR,
+            ClearBuffer::Output => PURGE_TXABORT | PURGE_TXCLEAR,
+            ClearBuffer::All => PURGE_RXABORT | PURGE_RXCLEAR | PURGE_TXABORT | PURGE_TXCLEAR,
+        };
+
+        if unsafe { PurgeComm(self.handle, buffer_flags) != 0 } {
+            Ok(())
+        } else {
+            Err(super::error::last_os_error())
+        }
+    }
+
+    pub fn set_break(&self) -> Result<()> {
+        if unsafe { SetCommBreak(self.handle) != 0 } {
+            Ok(())
+        } else {
+            Err(super::error::last_os_error())
+        }
+    }
+
+    pub fn clear_break(&self) -> Result<()> {
+        if unsafe { ClearCommBreak(self.handle) != 0 } {
+            Ok(())
+        } else {
+            Err(super::error::last_os_error())
+        }
+    }
 }
 
 impl Drop for SerialPort {
@@ -197,7 +394,7 @@ impl IntoRawHandle for SerialPort {
     }
 }
 
-impl io::Read for SerialPort {
+impl io::Read for &SerialPort {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         let mut len: DWORD = 0;
 
@@ -225,7 +422,7 @@ impl io::Read for SerialPort {
     }
 }
 
-impl io::Write for SerialPort {
+impl io::Write for &SerialPort {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         let mut len: DWORD = 0;
 
@@ -251,208 +448,21 @@ impl io::Write for SerialPort {
     }
 }
 
-impl SerialPort {
-    fn name(&self) -> Option<String> {
-        self.port_name.clone()
-    }
-
-    fn timeout(&self) -> Duration {
-        self.timeout
-    }
-
-    fn set_timeout(&mut self, timeout: Duration) -> Result<()> {
-        let timeout_constant = Self::timeout_constant(timeout);
-
-        let mut timeouts = COMMTIMEOUTS {
-            ReadIntervalTimeout: MAXDWORD,
-            ReadTotalTimeoutMultiplier: MAXDWORD,
-            ReadTotalTimeoutConstant: timeout_constant,
-            WriteTotalTimeoutMultiplier: 0,
-            WriteTotalTimeoutConstant: timeout_constant,
-        };
-
-        if unsafe { SetCommTimeouts(self.handle, &mut timeouts) } == 0 {
+impl SerialPortExt for SerialPort {
+    fn comm_timeouts(&self) -> Result<CommTimeouts> {
+        let mut timeouts: COMMTIMEOUTS = unsafe { MaybeUninit::zeroed().assume_init() };
+        if unsafe { GetCommTimeouts(self.handle, &mut timeouts) } == FALSE {
             return Err(super::error::last_os_error());
         }
+        Ok(timeouts.into())
+    }
 
-        self.timeout = timeout;
+    fn set_comm_timeouts(&self, timeouts: CommTimeouts) -> Result<()> {
+        let mut timeouts: COMMTIMEOUTS = timeouts.into();
+        if unsafe { SetCommTimeouts(self.handle, &mut timeouts) } == FALSE {
+            return Err(super::error::last_os_error());
+        }
         Ok(())
-    }
-
-    fn write_request_to_send(&mut self, level: bool) -> Result<()> {
-        if level {
-            self.escape_comm_function(SETRTS)
-        } else {
-            self.escape_comm_function(CLRRTS)
-        }
-    }
-
-    fn write_data_terminal_ready(&mut self, level: bool) -> Result<()> {
-        if level {
-            self.escape_comm_function(SETDTR)
-        } else {
-            self.escape_comm_function(CLRDTR)
-        }
-    }
-
-    fn read_clear_to_send(&mut self) -> Result<bool> {
-        self.read_pin(MS_CTS_ON)
-    }
-
-    fn read_data_set_ready(&mut self) -> Result<bool> {
-        self.read_pin(MS_DSR_ON)
-    }
-
-    fn read_ring_indicator(&mut self) -> Result<bool> {
-        self.read_pin(MS_RING_ON)
-    }
-
-    fn read_carrier_detect(&mut self) -> Result<bool> {
-        self.read_pin(MS_RLSD_ON)
-    }
-
-    fn baud_rate(&self) -> Result<u32> {
-        let dcb = dcb::get_dcb(self.handle)?;
-        Ok(dcb.BaudRate as u32)
-    }
-
-    fn data_bits(&self) -> Result<DataBits> {
-        let dcb = dcb::get_dcb(self.handle)?;
-        match dcb.ByteSize {
-            5 => Ok(DataBits::Five),
-            6 => Ok(DataBits::Six),
-            7 => Ok(DataBits::Seven),
-            8 => Ok(DataBits::Eight),
-            _ => Err(Error::new(
-                ErrorKind::Unknown,
-                "Invalid data bits setting encountered",
-            )),
-        }
-    }
-
-    fn parity(&self) -> Result<Parity> {
-        let dcb = dcb::get_dcb(self.handle)?;
-        match dcb.Parity {
-            ODDPARITY => Ok(Parity::Odd),
-            EVENPARITY => Ok(Parity::Even),
-            NOPARITY => Ok(Parity::None),
-            _ => Err(Error::new(
-                ErrorKind::Unknown,
-                "Invalid parity bits setting encountered",
-            )),
-        }
-    }
-
-    fn stop_bits(&self) -> Result<StopBits> {
-        let dcb = dcb::get_dcb(self.handle)?;
-        match dcb.StopBits {
-            TWOSTOPBITS => Ok(StopBits::Two),
-            ONESTOPBIT => Ok(StopBits::One),
-            _ => Err(Error::new(
-                ErrorKind::Unknown,
-                "Invalid stop bits setting encountered",
-            )),
-        }
-    }
-
-    fn flow_control(&self) -> Result<FlowControl> {
-        let dcb = dcb::get_dcb(self.handle)?;
-        if dcb.fOutxCtsFlow() != 0 || dcb.fRtsControl() != 0 {
-            Ok(FlowControl::Hardware)
-        } else if dcb.fOutX() != 0 || dcb.fInX() != 0 {
-            Ok(FlowControl::Software)
-        } else {
-            Ok(FlowControl::None)
-        }
-    }
-
-    fn set_baud_rate(&mut self, baud_rate: u32) -> Result<()> {
-        let mut dcb = dcb::get_dcb(self.handle)?;
-        dcb::set_baud_rate(&mut dcb, baud_rate);
-        dcb::set_dcb(self.handle, dcb)
-    }
-
-    fn set_data_bits(&mut self, data_bits: DataBits) -> Result<()> {
-        let mut dcb = dcb::get_dcb(self.handle)?;
-        dcb::set_data_bits(&mut dcb, data_bits);
-        dcb::set_dcb(self.handle, dcb)
-    }
-
-    fn set_parity(&mut self, parity: Parity) -> Result<()> {
-        let mut dcb = dcb::get_dcb(self.handle)?;
-        dcb::set_parity(&mut dcb, parity);
-        dcb::set_dcb(self.handle, dcb)
-    }
-
-    fn set_stop_bits(&mut self, stop_bits: StopBits) -> Result<()> {
-        let mut dcb = dcb::get_dcb(self.handle)?;
-        dcb::set_stop_bits(&mut dcb, stop_bits);
-        dcb::set_dcb(self.handle, dcb)
-    }
-
-    fn set_flow_control(&mut self, flow_control: FlowControl) -> Result<()> {
-        let mut dcb = dcb::get_dcb(self.handle)?;
-        dcb::set_flow_control(&mut dcb, flow_control);
-        dcb::set_dcb(self.handle, dcb)
-    }
-
-    fn bytes_to_read(&self) -> Result<u32> {
-        let mut errors: DWORD = 0;
-        let mut comstat = MaybeUninit::uninit();
-
-        if unsafe { ClearCommError(self.handle, &mut errors, comstat.as_mut_ptr()) != 0 } {
-            unsafe { Ok(comstat.assume_init().cbInQue) }
-        } else {
-            Err(super::error::last_os_error())
-        }
-    }
-
-    fn bytes_to_write(&self) -> Result<u32> {
-        let mut errors: DWORD = 0;
-        let mut comstat = MaybeUninit::uninit();
-
-        if unsafe { ClearCommError(self.handle, &mut errors, comstat.as_mut_ptr()) != 0 } {
-            unsafe { Ok(comstat.assume_init().cbOutQue) }
-        } else {
-            Err(super::error::last_os_error())
-        }
-    }
-
-    fn clear(&self, buffer_to_clear: ClearBuffer) -> Result<()> {
-        let buffer_flags = match buffer_to_clear {
-            ClearBuffer::Input => PURGE_RXABORT | PURGE_RXCLEAR,
-            ClearBuffer::Output => PURGE_TXABORT | PURGE_TXCLEAR,
-            ClearBuffer::All => PURGE_RXABORT | PURGE_RXCLEAR | PURGE_TXABORT | PURGE_TXCLEAR,
-        };
-
-        if unsafe { PurgeComm(self.handle, buffer_flags) != 0 } {
-            Ok(())
-        } else {
-            Err(super::error::last_os_error())
-        }
-    }
-
-    fn try_clone(&self) -> Result<Box<dyn SerialPort>> {
-        match self.try_clone_native() {
-            Ok(p) => Ok(Box::new(p)),
-            Err(e) => Err(e),
-        }
-    }
-
-    fn set_break(&self) -> Result<()> {
-        if unsafe { SetCommBreak(self.handle) != 0 } {
-            Ok(())
-        } else {
-            Err(super::error::last_os_error())
-        }
-    }
-
-    fn clear_break(&self) -> Result<()> {
-        if unsafe { ClearCommBreak(self.handle) != 0 } {
-            Ok(())
-        } else {
-            Err(super::error::last_os_error())
-        }
     }
 }
 

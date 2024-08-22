@@ -398,11 +398,6 @@ impl SerialPortBuilder {
 pub struct SerialPort(sys::SerialPort);
 
 impl SerialPort {
-    /// Get a builder for a serial port with the default settings.
-    pub fn builder() -> SerialPortBuilder {
-        Default::default()
-    }
-
     // Port settings getters
 
     /// Returns the name of this port if it exists.
@@ -410,7 +405,7 @@ impl SerialPort {
     /// This name may not be the canonical device name and instead be shorthand.
     /// Additionally it may not exist for virtual ports or ports created from a raw
     /// handle or file descriptor.
-    pub fn name(&self) -> Option<&str> {
+    pub fn name(&self) -> Option<String> {
         self.0.name()
     }
 
@@ -462,14 +457,9 @@ impl SerialPort {
         self.0.stop_bits()
     }
 
-    /// Returns the current read timeout.
-    pub fn read_timeout(&self) -> Option<Duration> {
-        self.0.read_timeout()
-    }
-
-    /// Returns the current write timeout.
-    pub fn write_timeout(&self) -> Option<Duration> {
-        self.0.write_timeout()
+    /// Returns the current timeout.
+    pub fn timeout(&self) -> Duration {
+        self.0.timeout()
     }
 
     // Port settings setters
@@ -505,14 +495,17 @@ impl SerialPort {
         self.0.set_stop_bits(stop_bits)
     }
 
-    /// Sets the read timeout for future I/O operations.
-    pub fn set_read_timeout(&mut self, read_timeout: Option<Duration>) -> Result<()> {
-        self.0.set_read_timeout(read_timeout)
-    }
-
-    /// Sets the write timeout for future I/O operations.
-    pub fn set_write_timeout(&mut self, write_timeout: Option<Duration>) -> Result<()> {
-        self.0.set_write_timeout(write_timeout)
+    /// Sets the timeout for future I/O operations.
+    ///
+    /// <div class="warning">
+    ///
+    /// The accuracy is limited by the underlying platform's capabilities. Longer timeouts will be
+    /// clamped to the maximum supported value which is expected to be in the magnitude of a few
+    /// days.
+    ///
+    /// </div>
+    fn set_timeout(&mut self, timeout: Duration) -> Result<()> {
+        self.0.set_timeout(timeout)
     }
 
     // Functions for setting non-data control signal pins
@@ -705,6 +698,7 @@ impl io::Write for &SerialPort {
         io::Write::flush(&mut &self.0)
     }
 }
+
 /// Contains all possible USB information about a `SerialPort`
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -776,10 +770,10 @@ pub fn new<'a>(path: impl Into<std::borrow::Cow<'a, str>>, baud_rate: u32) -> Se
 /// returned by this function.
 pub fn available_ports() -> Result<Vec<SerialPortInfo>> {
     #[cfg(unix)]
-    return crate::posix::available_ports();
+    return crate::sys::available_ports();
 
     #[cfg(windows)]
-    return crate::windows::available_ports();
+    return crate::sys::available_ports();
 
     #[cfg(not(any(unix, windows)))]
     Err(Error::new(
