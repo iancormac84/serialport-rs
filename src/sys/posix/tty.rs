@@ -114,7 +114,7 @@ impl TTYPort {
     ///    the device is already in use.
     /// * `InvalidInput` if `path` is not a valid device name.
     /// * `Io` for any other error while opening or initializing the device.
-    pub fn open(builder: &SerialPortBuilder) -> Result<TTYPort> {
+    pub fn open(builder: SerialPortBuilder) -> Result<TTYPort> {
         use nix::fcntl::FcntlArg::F_SETFL;
         use nix::libc::{cfmakeraw, tcgetattr, tcsetattr};
 

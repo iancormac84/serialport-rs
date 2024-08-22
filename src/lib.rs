@@ -389,6 +389,13 @@ impl SerialPortBuilder {
         self.timeout = timeout;
         self
     }
+
+    /// Open a cross-platform interface to the port with the specified settings.
+    ///
+    /// On windows, the path must start with the device prefix, e.g. `\\.\`.
+    pub fn open(self) -> Result<SerialPort> {
+        Ok(SerialPort(sys::SerialPort::open(self)?))
+    }
 }
 
 /// A Serial Port device.
@@ -769,15 +776,5 @@ pub fn new<'a>(path: impl Into<std::borrow::Cow<'a, str>>, baud_rate: u32) -> Se
 /// It is not guaranteed that these ports exist or are available even if they're
 /// returned by this function.
 pub fn available_ports() -> Result<Vec<SerialPortInfo>> {
-    #[cfg(unix)]
-    return crate::sys::available_ports();
-
-    #[cfg(windows)]
-    return crate::sys::available_ports();
-
-    #[cfg(not(any(unix, windows)))]
-    Err(Error::new(
-        ErrorKind::Unknown,
-        "available_ports() not implemented for platform",
-    ))
+    sys::available_ports()
 }

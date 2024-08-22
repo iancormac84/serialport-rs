@@ -51,7 +51,7 @@ impl SerialPort {
     ///    the device is already in use.
     /// * `InvalidInput` if `port` is not a valid device name.
     /// * `Io` for any other I/O error while opening or initializing the device.
-    pub fn open(builder: &SerialPortBuilder) -> Result<SerialPort> {
+    pub fn open(builder: SerialPortBuilder) -> Result<SerialPort> {
         let mut name = Vec::<u16>::with_capacity(4 + builder.path.len() + 1);
 
         name.extend(r"\\.\".encode_utf16());
