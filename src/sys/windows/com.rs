@@ -13,9 +13,9 @@ use winapi::um::winnt::{
     DUPLICATE_SAME_ACCESS, FILE_ATTRIBUTE_NORMAL, GENERIC_READ, GENERIC_WRITE, HANDLE, MAXDWORD,
 };
 
-use crate::windows::dcb;
+use crate::sys::windows::dcb;
 use crate::{
-    ClearBuffer, DataBits, Error, ErrorKind, FlowControl, Parity, Result, SerialPort,
+    ClearBuffer, DataBits, Error, ErrorKind, FlowControl, Parity, Result,
     SerialPortBuilder, StopBits,
 };
 
@@ -26,15 +26,16 @@ use crate::{
 /// the cross-platform `serialport::open()` or
 /// `serialport::open_with_settings()`.
 #[derive(Debug)]
-pub struct COMPort {
+pub struct SerialPort {
     handle: HANDLE,
     timeout: Duration,
     port_name: Option<String>,
 }
 
-unsafe impl Send for COMPort {}
+unsafe impl Send for SerialPort {}
+unsafe impl Sync for SerialPort {}
 
-impl COMPort {
+impl SerialPort {
     /// Opens a COM port as a serial device.
     ///
     /// `port` should be the name of a COM port, e.g., `COM1`.
@@ -49,7 +50,7 @@ impl COMPort {
     ///    the device is already in use.
     /// * `InvalidInput` if `port` is not a valid device name.
     /// * `Io` for any other I/O error while opening or initializing the device.
-    pub fn open(builder: &SerialPortBuilder) -> Result<COMPort> {
+    pub fn open(builder: &SerialPortBuilder) -> Result<SerialPort> {
         let mut name = Vec::<u16>::with_capacity(4 + builder.path.len() + 1);
 
         name.extend(r"\\.\".encode_utf16());
@@ -74,7 +75,7 @@ impl COMPort {
 
         // create the COMPort here so the handle is getting closed
         // if one of the calls to `get_dcb()` or `set_dcb()` fails
-        let mut com = COMPort::open_from_raw_handle(handle as RawHandle);
+        let mut com = SerialPort::open_from_raw_handle(handle as RawHandle);
 
         let mut dcb = dcb::get_dcb(handle)?;
         dcb::init(&mut dcb);
@@ -104,7 +105,7 @@ impl COMPort {
     /// # Errors
     ///
     /// This function returns an error if the serial port couldn't be cloned.
-    pub fn try_clone_native(&self) -> Result<COMPort> {
+    pub fn try_clone_native(&self) -> Result<SerialPort> {
         let process_handle: HANDLE = unsafe { GetCurrentProcess() };
         let mut cloned_handle: HANDLE = INVALID_HANDLE_VALUE;
         unsafe {
@@ -118,7 +119,7 @@ impl COMPort {
                 DUPLICATE_SAME_ACCESS,
             );
             if cloned_handle != INVALID_HANDLE_VALUE {
-                Ok(COMPort {
+                Ok(SerialPort {
                     handle: cloned_handle,
                     port_name: self.port_name.clone(),
                     timeout: self.timeout,
@@ -148,7 +149,7 @@ impl COMPort {
     fn open_from_raw_handle(handle: RawHandle) -> Self {
         // It is not trivial to get the file path corresponding to a handle.
         // We'll punt and set it `None` here.
-        COMPort {
+        SerialPort {
             handle: handle as HANDLE,
             timeout: Duration::from_millis(100),
             port_name: None,
@@ -168,7 +169,7 @@ impl COMPort {
     }
 }
 
-impl Drop for COMPort {
+impl Drop for SerialPort {
     fn drop(&mut self) {
         unsafe {
             CloseHandle(self.handle);
@@ -176,19 +177,19 @@ impl Drop for COMPort {
     }
 }
 
-impl AsRawHandle for COMPort {
+impl AsRawHandle for SerialPort {
     fn as_raw_handle(&self) -> RawHandle {
         self.handle as RawHandle
     }
 }
 
-impl FromRawHandle for COMPort {
+impl FromRawHandle for SerialPort {
     unsafe fn from_raw_handle(handle: RawHandle) -> Self {
-        COMPort::open_from_raw_handle(handle)
+        SerialPort::open_from_raw_handle(handle)
     }
 }
 
-impl IntoRawHandle for COMPort {
+impl IntoRawHandle for SerialPort {
     fn into_raw_handle(self) -> RawHandle {
         let Self { handle, .. } = self;
 
@@ -196,7 +197,7 @@ impl IntoRawHandle for COMPort {
     }
 }
 
-impl io::Read for COMPort {
+impl io::Read for SerialPort {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         let mut len: DWORD = 0;
 
@@ -224,7 +225,7 @@ impl io::Read for COMPort {
     }
 }
 
-impl io::Write for COMPort {
+impl io::Write for SerialPort {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         let mut len: DWORD = 0;
 
@@ -250,7 +251,7 @@ impl io::Write for COMPort {
     }
 }
 
-impl SerialPort for COMPort {
+impl SerialPort {
     fn name(&self) -> Option<String> {
         self.port_name.clone()
     }
@@ -462,10 +463,10 @@ mod tests {
 
     #[test]
     fn timeout_constant_is_monotonic() {
-        let mut last = COMPort::timeout_constant(Duration::ZERO);
+        let mut last = SerialPort::timeout_constant(Duration::ZERO);
 
         for (i, d) in MONOTONIC_DURATIONS.iter().enumerate() {
-            let next = COMPort::timeout_constant(*d);
+            let next = SerialPort::timeout_constant(*d);
             dbg!((i, d));
             assert!(
                 next >= last,
@@ -477,6 +478,6 @@ mod tests {
 
     #[test]
     fn timeout_constant_zero_is_zero() {
-        assert_eq!(0, COMPort::timeout_constant(Duration::ZERO));
+        assert_eq!(0, SerialPort::timeout_constant(Duration::ZERO));
     }
 }

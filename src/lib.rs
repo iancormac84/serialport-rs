@@ -37,15 +37,13 @@ use std::io;
 use std::str::FromStr;
 use std::time::Duration;
 
-#[cfg(unix)]
-mod posix;
-#[cfg(unix)]
-pub use posix::{BreakDuration, TTYPort};
+mod sys;
 
-#[cfg(windows)]
-mod windows;
-#[cfg(windows)]
-pub use windows::COMPort;
+#[cfg(any(unix, doc))]
+pub mod posix;
+
+#[cfg(any(windows, doc))]
+pub mod windows;
 
 #[cfg(test)]
 pub(crate) mod tests;
@@ -391,54 +389,39 @@ impl SerialPortBuilder {
         self.timeout = timeout;
         self
     }
-
-    /// Open a cross-platform interface to the port with the specified settings
-    pub fn open(self) -> Result<Box<dyn SerialPort>> {
-        #[cfg(unix)]
-        return posix::TTYPort::open(&self).map(|p| Box::new(p) as Box<dyn SerialPort>);
-
-        #[cfg(windows)]
-        return windows::COMPort::open(&self).map(|p| Box::new(p) as Box<dyn SerialPort>);
-
-        #[cfg(not(any(unix, windows)))]
-        Err(Error::new(
-            ErrorKind::Unknown,
-            "open() not implemented for platform",
-        ))
-    }
-
-    /// Open a platform-specific interface to the port with the specified settings
-    #[cfg(unix)]
-    pub fn open_native(self) -> Result<TTYPort> {
-        posix::TTYPort::open(&self)
-    }
-
-    /// Open a platform-specific interface to the port with the specified settings
-    #[cfg(windows)]
-    pub fn open_native(self) -> Result<COMPort> {
-        windows::COMPort::open(&self)
-    }
 }
 
-/// A trait for serial port devices
+/// A Serial Port device.
 ///
-/// This trait is all that's necessary to implement a new serial port driver
-/// for a new platform.
-pub trait SerialPort: Send + io::Read + io::Write {
+/// See module-level documentation for an overview.
+#[derive(Debug)]
+pub struct SerialPort(sys::SerialPort);
+
+impl SerialPort {
+    /// Get a builder for a serial port with the default settings.
+    pub fn builder() -> SerialPortBuilder {
+        Default::default()
+    }
+
     // Port settings getters
 
     /// Returns the name of this port if it exists.
     ///
     /// This name may not be the canonical device name and instead be shorthand.
-    /// Additionally it may not exist for virtual ports.
-    fn name(&self) -> Option<String>;
+    /// Additionally it may not exist for virtual ports or ports created from a raw
+    /// handle or file descriptor.
+    pub fn name(&self) -> Option<&str> {
+        self.0.name()
+    }
 
     /// Returns the current baud rate.
     ///
     /// This may return a value different from the last specified baud rate depending on the
     /// platform as some will return the actual device baud rate rather than the last specified
     /// baud rate.
-    fn baud_rate(&self) -> Result<u32>;
+    pub fn baud_rate(&self) -> Result<u32> {
+        self.0.baud_rate()
+    }
 
     /// Returns the character size.
     ///
@@ -446,7 +429,9 @@ pub trait SerialPort: Send + io::Read + io::Write {
     /// if the hardware is in an uninitialized state or is using a non-standard character size.
     /// Setting a baud rate with `set_char_size()` should initialize the character size to a
     /// supported value.
-    fn data_bits(&self) -> Result<DataBits>;
+    pub fn data_bits(&self) -> Result<DataBits> {
+        self.0.data_bits()
+    }
 
     /// Returns the flow control mode.
     ///
@@ -454,14 +439,18 @@ pub trait SerialPort: Send + io::Read + io::Write {
     /// occur if the hardware is in an uninitialized state or is using an unsupported flow control
     /// mode. Setting a flow control mode with `set_flow_control()` should initialize the flow
     /// control mode to a supported value.
-    fn flow_control(&self) -> Result<FlowControl>;
+    pub fn flow_control(&self) -> Result<FlowControl> {
+        self.0.flow_control()
+    }
 
     /// Returns the parity-checking mode.
     ///
     /// This function returns `None` if the parity mode could not be determined. This may occur if
     /// the hardware is in an uninitialized state or is using a non-standard parity mode. Setting
     /// a parity mode with `set_parity()` should initialize the parity mode to a supported value.
-    fn parity(&self) -> Result<Parity>;
+    pub fn parity(&self) -> Result<Parity> {
+        self.0.parity()
+    }
 
     /// Returns the number of stop bits.
     ///
@@ -469,10 +458,19 @@ pub trait SerialPort: Send + io::Read + io::Write {
     /// occur if the hardware is in an uninitialized state or is using an unsupported stop bit
     /// configuration. Setting the number of stop bits with `set_stop-bits()` should initialize the
     /// stop bits to a supported value.
-    fn stop_bits(&self) -> Result<StopBits>;
+    pub fn stop_bits(&self) -> Result<StopBits> {
+        self.0.stop_bits()
+    }
 
-    /// Returns the current timeout.
-    fn timeout(&self) -> Duration;
+    /// Returns the current read timeout.
+    pub fn read_timeout(&self) -> Option<Duration> {
+        self.0.read_timeout()
+    }
+
+    /// Returns the current write timeout.
+    pub fn write_timeout(&self) -> Option<Duration> {
+        self.0.write_timeout()
+    }
 
     // Port settings setters
 
@@ -483,30 +481,39 @@ pub trait SerialPort: Send + io::Read + io::Write {
     /// If the implementation does not support the requested baud rate, this function may return an
     /// `InvalidInput` error. Even if the baud rate is accepted by `set_baud_rate()`, it may not be
     /// supported by the underlying hardware.
-    fn set_baud_rate(&mut self, baud_rate: u32) -> Result<()>;
+    pub fn set_baud_rate(&mut self, baud_rate: u32) -> Result<()> {
+        self.0.set_baud_rate(baud_rate)
+    }
 
     /// Sets the character size.
-    fn set_data_bits(&mut self, data_bits: DataBits) -> Result<()>;
+    pub fn set_data_bits(&mut self, data_bits: DataBits) -> Result<()> {
+        self.0.set_data_bits(data_bits)
+    }
 
     /// Sets the flow control mode.
-    fn set_flow_control(&mut self, flow_control: FlowControl) -> Result<()>;
+    pub fn set_flow_control(&mut self, flow_control: FlowControl) -> Result<()> {
+        self.0.set_flow_control(flow_control)
+    }
 
     /// Sets the parity-checking mode.
-    fn set_parity(&mut self, parity: Parity) -> Result<()>;
+    pub fn set_parity(&mut self, parity: Parity) -> Result<()> {
+        self.0.set_parity(parity)
+    }
 
     /// Sets the number of stop bits.
-    fn set_stop_bits(&mut self, stop_bits: StopBits) -> Result<()>;
+    pub fn set_stop_bits(&mut self, stop_bits: StopBits) -> Result<()> {
+        self.0.set_stop_bits(stop_bits)
+    }
 
-    /// Sets the timeout for future I/O operations.
-    ///
-    /// <div class="warning">
-    ///
-    /// The accuracy is limited by the underlying platform's capabilities. Longer timeouts will be
-    /// clamped to the maximum supported value which is expected to be in the magnitude of a few
-    /// days.
-    ///
-    /// </div>
-    fn set_timeout(&mut self, timeout: Duration) -> Result<()>;
+    /// Sets the read timeout for future I/O operations.
+    pub fn set_read_timeout(&mut self, read_timeout: Option<Duration>) -> Result<()> {
+        self.0.set_read_timeout(read_timeout)
+    }
+
+    /// Sets the write timeout for future I/O operations.
+    pub fn set_write_timeout(&mut self, write_timeout: Option<Duration>) -> Result<()> {
+        self.0.set_write_timeout(write_timeout)
+    }
 
     // Functions for setting non-data control signal pins
 
@@ -521,7 +528,9 @@ pub trait SerialPort: Send + io::Read + io::Write {
     ///
     /// * `NoDevice` if the device was disconnected.
     /// * `Io` for any other type of I/O error.
-    fn write_request_to_send(&mut self, level: bool) -> Result<()>;
+    pub fn write_request_to_send(&mut self, level: bool) -> Result<()> {
+        self.0.write_request_to_send(level)
+    }
 
     /// Writes to the Data Terminal Ready pin
     ///
@@ -534,7 +543,9 @@ pub trait SerialPort: Send + io::Read + io::Write {
     ///
     /// * `NoDevice` if the device was disconnected.
     /// * `Io` for any other type of I/O error.
-    fn write_data_terminal_ready(&mut self, level: bool) -> Result<()>;
+    pub fn write_data_terminal_ready(&mut self, level: bool) -> Result<()> {
+        self.0.write_data_terminal_ready(level)
+    }
 
     // Functions for reading additional pins
 
@@ -549,7 +560,9 @@ pub trait SerialPort: Send + io::Read + io::Write {
     ///
     /// * `NoDevice` if the device was disconnected.
     /// * `Io` for any other type of I/O error.
-    fn read_clear_to_send(&mut self) -> Result<bool>;
+    pub fn read_clear_to_send(&mut self) -> Result<bool> {
+        self.0.read_clear_to_send()
+    }
 
     /// Reads the state of the Data Set Ready control signal.
     ///
@@ -562,7 +575,9 @@ pub trait SerialPort: Send + io::Read + io::Write {
     ///
     /// * `NoDevice` if the device was disconnected.
     /// * `Io` for any other type of I/O error.
-    fn read_data_set_ready(&mut self) -> Result<bool>;
+    pub fn read_data_set_ready(&mut self) -> Result<bool> {
+        self.0.read_data_set_ready()
+    }
 
     /// Reads the state of the Ring Indicator control signal.
     ///
@@ -575,7 +590,9 @@ pub trait SerialPort: Send + io::Read + io::Write {
     ///
     /// * `NoDevice` if the device was disconnected.
     /// * `Io` for any other type of I/O error.
-    fn read_ring_indicator(&mut self) -> Result<bool>;
+    pub fn read_ring_indicator(&mut self) -> Result<bool> {
+        self.0.read_ring_indicator()
+    }
 
     /// Reads the state of the Carrier Detect control signal.
     ///
@@ -588,7 +605,9 @@ pub trait SerialPort: Send + io::Read + io::Write {
     ///
     /// * `NoDevice` if the device was disconnected.
     /// * `Io` for any other type of I/O error.
-    fn read_carrier_detect(&mut self) -> Result<bool>;
+    pub fn read_carrier_detect(&mut self) -> Result<bool> {
+        self.0.read_carrier_detect()
+    }
 
     /// Gets the number of bytes available to be read from the input buffer.
     ///
@@ -598,7 +617,9 @@ pub trait SerialPort: Send + io::Read + io::Write {
     ///
     /// * `NoDevice` if the device was disconnected.
     /// * `Io` for any other type of I/O error.
-    fn bytes_to_read(&self) -> Result<u32>;
+    pub fn bytes_to_read(&self) -> Result<u32> {
+        self.0.bytes_to_read()
+    }
 
     /// Get the number of bytes written to the output buffer, awaiting transmission.
     ///
@@ -608,7 +629,9 @@ pub trait SerialPort: Send + io::Read + io::Write {
     ///
     /// * `NoDevice` if the device was disconnected.
     /// * `Io` for any other type of I/O error.
-    fn bytes_to_write(&self) -> Result<u32>;
+    pub fn bytes_to_write(&self) -> Result<u32> {
+        self.0.bytes_to_write()
+    }
 
     /// Discards all bytes from the serial driver's input buffer and/or output buffer.
     ///
@@ -618,7 +641,9 @@ pub trait SerialPort: Send + io::Read + io::Write {
     ///
     /// * `NoDevice` if the device was disconnected.
     /// * `Io` for any other type of I/O error.
-    fn clear(&self, buffer_to_clear: ClearBuffer) -> Result<()>;
+    pub fn clear(&self, buffer_to_clear: ClearBuffer) -> Result<()> {
+        self.0.clear(buffer_to_clear)
+    }
 
     // Misc methods
 
@@ -627,151 +652,59 @@ pub trait SerialPort: Send + io::Read + io::Write {
     /// should look at [mio-serial](https://crates.io/crates/mio-serial) or
     /// [tokio-serial](https://crates.io/crates/tokio-serial).
     ///
-    /// Also, you must be very careful when changing the settings of a cloned `SerialPort` : since
+    /// Also, you must be very carefull when changing the settings of a cloned `SerialPort` : since
     /// the settings are cached on a per object basis, trying to modify them from two different
     /// objects can cause some nasty behavior.
     ///
     /// # Errors
     ///
     /// This function returns an error if the serial port couldn't be cloned.
-    fn try_clone(&self) -> Result<Box<dyn SerialPort>>;
+    pub fn try_clone(&self) -> Result<Self> {
+        Ok(SerialPort(self.0.try_clone()?))
+    }
 
     /// Start transmitting a break
-    fn set_break(&self) -> Result<()>;
+    pub fn set_break(&self) -> Result<()> {
+        self.0.set_break()
+    }
 
     /// Stop transmitting a break
-    fn clear_break(&self) -> Result<()>;
-}
-
-impl<T: SerialPort> SerialPort for &mut T {
-    fn name(&self) -> Option<String> {
-        (**self).name()
-    }
-
-    fn baud_rate(&self) -> Result<u32> {
-        (**self).baud_rate()
-    }
-
-    fn data_bits(&self) -> Result<DataBits> {
-        (**self).data_bits()
-    }
-
-    fn flow_control(&self) -> Result<FlowControl> {
-        (**self).flow_control()
-    }
-
-    fn parity(&self) -> Result<Parity> {
-        (**self).parity()
-    }
-
-    fn stop_bits(&self) -> Result<StopBits> {
-        (**self).stop_bits()
-    }
-
-    fn timeout(&self) -> Duration {
-        (**self).timeout()
-    }
-
-    fn set_baud_rate(&mut self, baud_rate: u32) -> Result<()> {
-        (**self).set_baud_rate(baud_rate)
-    }
-
-    fn set_data_bits(&mut self, data_bits: DataBits) -> Result<()> {
-        (**self).set_data_bits(data_bits)
-    }
-
-    fn set_flow_control(&mut self, flow_control: FlowControl) -> Result<()> {
-        (**self).set_flow_control(flow_control)
-    }
-
-    fn set_parity(&mut self, parity: Parity) -> Result<()> {
-        (**self).set_parity(parity)
-    }
-
-    fn set_stop_bits(&mut self, stop_bits: StopBits) -> Result<()> {
-        (**self).set_stop_bits(stop_bits)
-    }
-
-    fn set_timeout(&mut self, timeout: Duration) -> Result<()> {
-        (**self).set_timeout(timeout)
-    }
-
-    fn write_request_to_send(&mut self, level: bool) -> Result<()> {
-        (**self).write_request_to_send(level)
-    }
-
-    fn write_data_terminal_ready(&mut self, level: bool) -> Result<()> {
-        (**self).write_data_terminal_ready(level)
-    }
-
-    fn read_clear_to_send(&mut self) -> Result<bool> {
-        (**self).read_clear_to_send()
-    }
-
-    fn read_data_set_ready(&mut self) -> Result<bool> {
-        (**self).read_data_set_ready()
-    }
-
-    fn read_ring_indicator(&mut self) -> Result<bool> {
-        (**self).read_ring_indicator()
-    }
-
-    fn read_carrier_detect(&mut self) -> Result<bool> {
-        (**self).read_carrier_detect()
-    }
-
-    fn bytes_to_read(&self) -> Result<u32> {
-        (**self).bytes_to_read()
-    }
-
-    fn bytes_to_write(&self) -> Result<u32> {
-        (**self).bytes_to_write()
-    }
-
-    fn clear(&self, buffer_to_clear: ClearBuffer) -> Result<()> {
-        (**self).clear(buffer_to_clear)
-    }
-
-    fn try_clone(&self) -> Result<Box<dyn SerialPort>> {
-        (**self).try_clone()
-    }
-
-    fn set_break(&self) -> Result<()> {
-        (**self).set_break()
-    }
-
-    fn clear_break(&self) -> Result<()> {
-        (**self).clear_break()
+    pub fn clear_break(&self) -> Result<()> {
+        self.0.clear_break()
     }
 }
 
-impl fmt::Debug for dyn SerialPort {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "SerialPort ( ")?;
-
-        if let Some(n) = self.name().as_ref() {
-            write!(f, "name: {} ", n)?;
-        };
-        if let Ok(b) = self.baud_rate().as_ref() {
-            write!(f, "baud_rate: {} ", b)?;
-        };
-        if let Ok(b) = self.data_bits().as_ref() {
-            write!(f, "data_bits: {} ", b)?;
-        };
-        if let Ok(c) = self.flow_control().as_ref() {
-            write!(f, "flow_control: {} ", c)?;
-        }
-        if let Ok(p) = self.parity().as_ref() {
-            write!(f, "parity: {} ", p)?;
-        }
-        if let Ok(s) = self.stop_bits().as_ref() {
-            write!(f, "stop_bits: {} ", s)?;
-        }
-
-        write!(f, ")")
+impl io::Read for SerialPort {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        io::Read::read(&mut &self.0, buf)
     }
 }
 
+impl io::Read for &SerialPort {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        io::Read::read(&mut &self.0, buf)
+    }
+}
+
+impl io::Write for SerialPort {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        io::Write::write(&mut &self.0, buf)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        io::Write::flush(&mut &self.0)
+    }
+}
+
+impl io::Write for &SerialPort {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        io::Write::write(&mut &self.0, buf)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        io::Write::flush(&mut &self.0)
+    }
+}
 /// Contains all possible USB information about a `SerialPort`
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
