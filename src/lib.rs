@@ -511,7 +511,7 @@ impl SerialPort {
     /// days.
     ///
     /// </div>
-    fn set_timeout(&mut self, timeout: Duration) -> Result<()> {
+    pub fn set_timeout(&mut self, timeout: Duration) -> Result<()> {
         self.0.set_timeout(timeout)
     }
 

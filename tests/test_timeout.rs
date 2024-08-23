@@ -3,7 +3,7 @@ mod config;
 use config::{hw_config, HardwareConfig};
 use rstest::rstest;
 use serialport::*;
-use std::io::Read;
+use std::io::{Read, Write};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -19,6 +19,8 @@ fn test_read_returns_available_data_before_timeout(
     #[case] chunk_size: usize,
     #[case] message: Vec<u8>,
 ) {
+    use std::io::Write;
+
     let send_period = Duration::from_millis(500);
     let receive_timeout = Duration::from_millis(3000);
     let marign = Duration::from_millis(100);
@@ -94,6 +96,8 @@ fn test_read_returns_available_data_before_timeout(
 #[case(b"0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~")]
 #[cfg_attr(feature = "ignore-hardware-tests", ignore)]
 fn test_timeout_zero(hw_config: HardwareConfig, #[case] message: &[u8]) {
+    use std::io::Write;
+
     let timeout = Duration::ZERO;
     let margin = Duration::from_millis(100);
 
@@ -144,6 +148,8 @@ fn test_timeout_zero(hw_config: HardwareConfig, #[case] message: &[u8]) {
 #[case(Duration::from_millis(1000))]
 #[cfg_attr(feature = "ignore-hardware-tests", ignore)]
 fn test_timeout_greater_zero(hw_config: HardwareConfig, #[case] timeout: Duration) {
+    use std::io::Write;
+
     let margin = Duration::from_millis(100);
 
     let mut sender = serialport::new(hw_config.port_1, 115200).open().unwrap();

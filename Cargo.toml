@@ -30,7 +30,7 @@ mach2 = "0.4.1"
 [target."cfg(windows)".dependencies.winapi]
 version = "0.3.9"
 features = [
-    "cguid", "commapi", "errhandlingapi", "fileapi", "guiddef", "handleapi", "minwinbase",
+    "cguid", "commapi", "errhandlingapi", "fileapi", "guiddef", "handleapi", "ioapiset", "minwinbase",
     "minwindef", "ntdef", "setupapi", "synchapi", "winbase", "winerror", "winnt",
 ]
 

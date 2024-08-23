@@ -1,12 +1,16 @@
-use std::mem::MaybeUninit;
+use std::mem::{self, MaybeUninit};
 use std::os::windows::prelude::*;
 use std::time::Duration;
 use std::{io, ptr};
 
 use winapi::shared::minwindef::*;
+use winapi::shared::winerror::ERROR_IO_PENDING;
 use winapi::um::commapi::*;
+use winapi::um::errhandlingapi::GetLastError;
 use winapi::um::fileapi::*;
 use winapi::um::handleapi::*;
+use winapi::um::ioapiset::GetOverlappedResult;
+use winapi::um::minwinbase::OVERLAPPED;
 use winapi::um::processthreadsapi::GetCurrentProcess;
 use winapi::um::winbase::*;
 use winapi::um::winnt::{
@@ -14,6 +18,7 @@ use winapi::um::winnt::{
 };
 
 use crate::sys::windows::dcb;
+use crate::sys::windows::event_cache::EventCache;
 use crate::windows::{CommTimeouts, SerialPortExt};
 use crate::{
     ClearBuffer, DataBits, Error, ErrorKind, FlowControl, Parity, Result, SerialPortBuilder,
@@ -29,6 +34,8 @@ use crate::{
 #[derive(Debug)]
 pub struct SerialPort {
     handle: HANDLE,
+    read_event: EventCache,
+    write_event: EventCache,
     timeout: Duration,
     port_name: Option<String>,
 }
@@ -122,6 +129,8 @@ impl SerialPort {
             if cloned_handle != INVALID_HANDLE_VALUE {
                 Ok(SerialPort {
                     handle: cloned_handle,
+                    read_event: EventCache::new(),
+                    write_event: EventCache::new(),
                     port_name: self.port_name.clone(),
                     timeout: self.timeout,
                 })
@@ -152,6 +161,8 @@ impl SerialPort {
         // We'll punt and set it `None` here.
         SerialPort {
             handle: handle as HANDLE,
+            read_event: EventCache::new(),
+            write_event: EventCache::new(),
             timeout: Duration::from_millis(100),
             port_name: None,
         }
@@ -386,17 +397,67 @@ impl FromRawHandle for SerialPort {
     }
 }
 
-impl IntoRawHandle for SerialPort {
-    fn into_raw_handle(self) -> RawHandle {
-        let Self { handle, .. } = self;
+impl FromRawHandle for crate::SerialPort {
+    /// Create a SerialPort from a raw handle.
+    ///
+    /// Warning: the returned `SerialPort` will report timeouts of `None` for
+    /// `read_timeout` and `write_timeout`, however the actual timeouts set on the
+    /// underlying handle may be different. You can use `set_read_timeout` and
+    /// `set_write_timeout` to reset the timeouts on the handle to make them match
+    /// the values on the `SerialPort`.
+    unsafe fn from_raw_handle(handle: RawHandle) -> Self {
+        crate::SerialPort(SerialPort::from_raw_handle(handle))
+    }
+}
 
+impl IntoRawHandle for SerialPort {
+    fn into_raw_handle(mut self) -> RawHandle {
+        // into_raw_handle needs to remove the handle from the `SerialPort` to
+        // return it, but also needs to prevent Drop from being called, since
+        // that would close the handle and make `into_raw_handle` unusuable.
+        // However, we also want to avoid leaking the rest of the contents of the
+        // struct, so we either need to take it out or be sure it doesn't need to
+        // be dropped.
+        let handle = self.handle;
+        // Take the port_name out of the option to drop it now.
+        self.port_name.take();
+
+        // Read out both the read_event and write event into different variables
+        // before forgetting. This is to prevent a double-free, which could happen
+        // if either of their destructors panics. For example, suppose we instead
+        // did ptr::drop_in_place(&self.read_event); If that call panics, we will
+        // double-free read_event, since we haven't forgotten self yet so the
+        // destructor for SerialPort will run and try to drop read_event again.
+        // This is even worse for write_event, since that would double-free both
+        // read_event and write_event. Therefore we want to pull these both out
+        // without dropping them, then forget self, then drop them, so that at
+        // worst a panic causes us to leak a handle rather than double-free.
+        //
+        // Unsafe safety: these reads are safe because we are going to forget
+        // self afterward so won't double-free.
+        let _read_event = unsafe { ptr::read(&self.read_event) };
+        let _write_event = unsafe { ptr::read(&self.write_event) };
+        mem::forget(self);
         handle as RawHandle
+    }
+}
+
+impl IntoRawHandle for crate::SerialPort {
+    fn into_raw_handle(self) -> RawHandle {
+        // crate::SerialPort doesn't explicitly implement Drop, so we can just take
+        // out the inner value.
+        self.0.into_raw_handle()
     }
 }
 
 impl io::Read for &SerialPort {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        assert!(buf.len() <= DWORD::MAX as usize);
         let mut len: DWORD = 0;
+
+        let read_event = self.read_event.take_or_create()?;
+        let mut overlapped: OVERLAPPED = unsafe { MaybeUninit::zeroed().assume_init() };
+        overlapped.hEvent = read_event.handle();
 
         match unsafe {
             ReadFile(
@@ -404,27 +465,36 @@ impl io::Read for &SerialPort {
                 buf.as_mut_ptr() as LPVOID,
                 buf.len() as DWORD,
                 &mut len,
-                ptr::null_mut(),
+                &mut overlapped,
             )
         } {
-            0 => Err(io::Error::last_os_error()),
-            _ => {
-                if len != 0 {
-                    Ok(len as usize)
-                } else {
-                    Err(io::Error::new(
-                        io::ErrorKind::TimedOut,
-                        "Operation timed out",
-                    ))
-                }
-            }
+            FALSE if unsafe { GetLastError() } == ERROR_IO_PENDING => {}
+            FALSE => return Err(io::Error::last_os_error()),
+            _ => return Ok(len as usize),
+        }
+
+        if unsafe { GetOverlappedResult(self.handle, &mut overlapped, &mut len, TRUE) } == FALSE {
+            return Err(io::Error::last_os_error());
+        }
+        match len {
+            0 if buf.len() == 0 => Ok(0),
+            0 => Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "ReadFile() timed out (0 bytes read)",
+            )),
+            _ => Ok(len as usize),
         }
     }
 }
 
 impl io::Write for &SerialPort {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        assert!(buf.len() <= DWORD::MAX as usize);
         let mut len: DWORD = 0;
+
+        let write_event = self.write_event.take_or_create()?;
+        let mut overlapped: OVERLAPPED = unsafe { MaybeUninit::zeroed().assume_init() };
+        overlapped.hEvent = write_event.handle();
 
         match unsafe {
             WriteFile(
@@ -432,10 +502,38 @@ impl io::Write for &SerialPort {
                 buf.as_ptr() as LPVOID,
                 buf.len() as DWORD,
                 &mut len,
-                ptr::null_mut(),
+                &mut overlapped,
             )
         } {
-            0 => Err(io::Error::last_os_error()),
+            FALSE if unsafe { GetLastError() } == ERROR_IO_PENDING => {}
+            FALSE => return Err(io::Error::last_os_error()),
+            _ => return Ok(len as usize),
+        }
+
+        if unsafe { GetOverlappedResult(self.handle, &mut overlapped, &mut len, TRUE) } == FALSE {
+            return Err(io::Error::last_os_error());
+            // // WriteFile() may fail with ERROR_SEM_TIMEOUT, which is not
+            // // io::ErrorKind::TimedOut prior to Rust 1.46, so create a custom
+            // // error with kind TimedOut to simplify subsequent error handling.
+            // // https://github.com/rust-lang/rust/pull/71756
+            // let error = io::Error::last_os_error();
+            // // TODO: wrap if clause in if_rust_version! { < 1.46 { ... }}
+            // if error.raw_os_error().unwrap() as DWORD == ERROR_SEM_TIMEOUT
+            //     && error.kind() != io::ErrorKind::TimedOut
+            // {
+            //     return Err(io::Error::new(
+            //         io::ErrorKind::TimedOut,
+            //         "WriteFile() timed out (ERROR_SEM_TIMEOUT)",
+            //     ));
+            // }
+            // return Err(error);
+        }
+        match len {
+            0 if buf.len() == 0 => Ok(0),
+            0 => Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "WriteFile() timed out (0 bytes written)",
+            )),
             _ => Ok(len as usize),
         }
     }

@@ -1,4 +1,4 @@
-//! Tests for the `SerialPort` trait.
+//! Tests for the `SerialPort` type.
 mod config;
 
 use config::{hw_config, HardwareConfig};
@@ -29,14 +29,6 @@ fn test_opening_found_ports(hw_config: HardwareConfig) {
 #[cfg_attr(feature = "ignore-hardware-tests", ignore)]
 fn test_opening_port(hw_config: HardwareConfig) {
     serialport::new(hw_config.port_1, 9600).open().unwrap();
-}
-
-#[rstest]
-#[cfg_attr(feature = "ignore-hardware-tests", ignore)]
-fn test_opening_native_port(hw_config: HardwareConfig) {
-    serialport::new(hw_config.port_1, 9600)
-        .open_native()
-        .unwrap();
 }
 
 #[rstest]
