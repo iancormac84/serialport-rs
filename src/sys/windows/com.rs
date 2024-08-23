@@ -28,7 +28,7 @@ use crate::{
 /// A serial port implementation for Windows COM ports
 ///
 /// The port will be closed when the value is dropped. However, this struct
-/// should not be instantiated directly by using `COMPort::open()`, instead use
+/// should not be instantiated directly by using `SerialPort::open()`, instead use
 /// the cross-platform `serialport::open()` or
 /// `serialport::open_with_settings()`.
 #[derive(Debug)]
@@ -49,7 +49,7 @@ impl SerialPort {
     /// `port` should be the name of a COM port, e.g., `COM1`.
     ///
     /// If the COM port handle needs to be opened with special flags, use
-    /// `from_raw_handle` method to create the `COMPort`. Note that you should
+    /// `from_raw_handle` method to create the `SerialPort`. Note that you should
     /// set the different settings before using the serial port using `set_all`.
     ///
     /// ## Errors
@@ -72,7 +72,7 @@ impl SerialPort {
                 0,
                 ptr::null_mut(),
                 OPEN_EXISTING,
-                FILE_ATTRIBUTE_NORMAL,
+                FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OVERLAPPED,
                 0 as HANDLE,
             )
         };
@@ -81,7 +81,7 @@ impl SerialPort {
             return Err(super::error::last_os_error());
         }
 
-        // create the COMPort here so the handle is getting closed
+        // create the SerialPort here so the handle is getting closed
         // if one of the calls to `get_dcb()` or `set_dcb()` fails
         let mut com = SerialPort::open_from_raw_handle(handle as RawHandle);
 
@@ -107,8 +107,6 @@ impl SerialPort {
     /// Also, you must be very careful when changing the settings of a cloned `SerialPort` : since
     /// the settings are cached on a per object basis, trying to modify them from two different
     /// objects can cause some nasty behavior.
-    ///
-    /// This is the same as `SerialPort::try_clone()` but returns the concrete type instead.
     ///
     /// # Errors
     ///
@@ -180,8 +178,8 @@ impl SerialPort {
         u128::min(milliseconds, MAXDWORD as u128 - 1) as DWORD
     }
 
-    pub fn name(&self) -> Option<String> {
-        self.port_name.clone()
+    pub fn name(&self) -> Option<&str> {
+        self.port_name.as_ref().map(|s| &**s)
     }
 
     pub fn timeout(&self) -> Duration {

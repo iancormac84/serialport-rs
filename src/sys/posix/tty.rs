@@ -34,7 +34,7 @@ fn close(fd: RawFd) {
 /// A serial port implementation for POSIX TTY ports
 ///
 /// The port will be closed when the value is dropped. This struct
-/// should not be instantiated directly by using `TTYPort::open()`.
+/// should not be instantiated directly by using `SerialPort::open()`.
 /// Instead, use the cross-platform `serialport::new()`. Example:
 ///
 /// ```no_run
@@ -48,17 +48,17 @@ fn close(fd: RawFd) {
 /// that would otherwise happen via an `ioctl` command.
 ///
 /// ```
-/// use serialport::{TTYPort, SerialPort};
+/// use serialport::{SerialPort, SerialPort};
 ///
-/// let (mut master, mut slave) = TTYPort::pair().expect("Unable to create ptty pair");
+/// let (mut master, mut slave) = SerialPort::pair().expect("Unable to create ptty pair");
 /// # let _ = &mut master;
 /// # let _ = &mut slave;
 /// // ... elsewhere
-/// let mut port = TTYPort::open(&serialport::new(slave.name().unwrap(), 0)).expect("Unable to open");
+/// let mut port = SerialPort::open(&serialport::new(slave.name().unwrap(), 0)).expect("Unable to open");
 /// # let _ = &mut port;
 /// ```
 #[derive(Debug)]
-pub struct TTYPort {
+pub struct SerialPort {
     fd: RawFd,
     timeout: Duration,
     exclusive: bool,
@@ -96,17 +96,17 @@ impl OwnedFd {
     }
 }
 
-impl TTYPort {
+impl SerialPort {
     /// Opens a TTY device as a serial port.
     ///
     /// `path` should be the path to a TTY device, e.g., `/dev/ttyS0`.
     ///
     /// Ports are opened in exclusive mode by default. If this is undesirable
-    /// behavior, use `TTYPort::set_exclusive(false)`.
+    /// behavior, use `SerialPort::set_exclusive(false)`.
     ///
     /// If the port settings differ from the default settings, characters received
     /// before the new settings become active may be garbled. To remove those
-    /// from the receive buffer, call `TTYPort::clear(ClearBuffer::Input)`.
+    /// from the receive buffer, call `SerialPort::clear(ClearBuffer::Input)`.
     ///
     /// ## Errors
     ///
@@ -114,7 +114,7 @@ impl TTYPort {
     ///    the device is already in use.
     /// * `InvalidInput` if `path` is not a valid device name.
     /// * `Io` for any other error while opening or initializing the device.
-    pub fn open(builder: SerialPortBuilder) -> Result<TTYPort> {
+    pub fn open(builder: SerialPortBuilder) -> Result<SerialPort> {
         use nix::fcntl::FcntlArg::F_SETFL;
         use nix::libc::{cfmakeraw, tcgetattr, tcsetattr};
 
@@ -183,7 +183,7 @@ impl TTYPort {
         termios::set_termios(fd.0, &termios)?;
 
         // Return the final port object
-        Ok(TTYPort {
+        Ok(SerialPort {
             fd: fd.into_raw(),
             timeout: builder.timeout,
             exclusive: true,
@@ -238,7 +238,7 @@ impl TTYPort {
     /// Create a pair of pseudo serial terminals
     ///
     /// ## Returns
-    /// Two connected `TTYPort` objects: `(master, slave)`
+    /// Two connected `SerialPort` objects: `(master, slave)`
     ///
     /// ## Errors
     /// Attempting any IO or parameter settings on the slave tty after the master
@@ -250,9 +250,9 @@ impl TTYPort {
     /// ## Examples
     ///
     /// ```
-    /// use serialport::TTYPort;
+    /// use serialport::SerialPort;
     ///
-    /// let (mut master, mut slave) = TTYPort::pair().unwrap();
+    /// let (mut master, mut slave) = SerialPort::pair().unwrap();
     ///
     /// # let _ = &mut master;
     /// # let _ = &mut slave;
@@ -309,7 +309,7 @@ impl TTYPort {
             nix::fcntl::FcntlArg::F_SETFL(nix::fcntl::OFlag::empty()),
         )?;
 
-        let slave_tty = TTYPort {
+        let slave_tty = SerialPort {
             fd,
             timeout: Duration::from_millis(100),
             exclusive: true,
@@ -321,7 +321,7 @@ impl TTYPort {
         // Manually construct the master port here because the
         // `tcgetattr()` doesn't work on Mac, Solaris, and maybe other
         // BSDs when used on the master port.
-        let master_tty = TTYPort {
+        let master_tty = SerialPort {
             fd: next_pty_fd.into_raw_fd(),
             timeout: Duration::from_millis(100),
             exclusive: true,
@@ -356,9 +356,9 @@ impl TTYPort {
     /// # Errors
     ///
     /// This function returns an error if the serial port couldn't be cloned.
-    pub fn try_clone_native(&self) -> Result<TTYPort> {
+    pub fn try_clone(&self) -> Result<SerialPort> {
         let fd_cloned: i32 = fcntl(self.fd, nix::fcntl::F_DUPFD_CLOEXEC(self.fd))?;
-        Ok(TTYPort {
+        Ok(SerialPort {
             fd: fd_cloned,
             exclusive: self.exclusive,
             port_name: self.port_name.clone(),
@@ -659,24 +659,24 @@ impl TTYPort {
     }
 }
 
-impl Drop for TTYPort {
+impl Drop for SerialPort {
     fn drop(&mut self) {
         close(self.fd);
     }
 }
 
-impl AsRawFd for TTYPort {
+impl AsRawFd for SerialPort {
     fn as_raw_fd(&self) -> RawFd {
         self.fd
     }
 }
 
-impl IntoRawFd for TTYPort {
+impl IntoRawFd for SerialPort {
     fn into_raw_fd(self) -> RawFd {
         // Pull just the file descriptor out. We also prevent the destructor
         // from being run by calling `mem::forget`. If we didn't do this, the
         // port would be closed, which would make `into_raw_fd` unusable.
-        let TTYPort { fd, .. } = self;
+        let SerialPort { fd, .. } = self;
         mem::forget(self);
         fd
     }
@@ -693,9 +693,9 @@ fn get_termios_speed(fd: RawFd) -> u32 {
     termios.c_ospeed as u32
 }
 
-impl FromRawFd for TTYPort {
+impl FromRawFd for SerialPort {
     unsafe fn from_raw_fd(fd: RawFd) -> Self {
-        TTYPort {
+        SerialPort {
             fd,
             timeout: Duration::from_millis(100),
             exclusive: ioctl::tiocexcl(fd).is_ok(),
@@ -711,7 +711,7 @@ impl FromRawFd for TTYPort {
     }
 }
 
-impl io::Read for TTYPort {
+impl io::Read for SerialPort {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         if let Err(e) = super::poll::wait_read_fd(self.fd, self.timeout) {
             return Err(io::Error::from(Error::from(e)));
@@ -721,7 +721,7 @@ impl io::Read for TTYPort {
     }
 }
 
-impl io::Write for TTYPort {
+impl io::Write for SerialPort {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         if let Err(e) = super::poll::wait_write_fd(self.fd, self.timeout) {
             return Err(io::Error::from(Error::from(e)));
@@ -737,13 +737,13 @@ impl io::Write for TTYPort {
 }
 
 #[test]
-fn test_ttyport_into_raw_fd() {
+fn test_SerialPort_into_raw_fd() {
     // `master` must be used here as Dropping it causes slave to be deleted by the OS.
     // TODO: Convert this to a statement-level attribute once
     //       https://github.com/rust-lang/rust/issues/15701 is on stable.
-    // FIXME: Create a mutex across all tests for using `TTYPort::pair()` as it's not threadsafe
+    // FIXME: Create a mutex across all tests for using `SerialPort::pair()` as it's not threadsafe
     #![allow(unused_variables)]
-    let (master, slave) = TTYPort::pair().expect("Unable to create ptty pair");
+    let (master, slave) = SerialPort::pair().expect("Unable to create ptty pair");
 
     // First test with the master
     let master_fd = master.into_raw_fd();

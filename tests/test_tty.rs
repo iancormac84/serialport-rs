@@ -1,4 +1,4 @@
-//! Tests for the `posix::TTYPort` struct.
+//! Tests for the `posix::SerialPort` struct.
 #![cfg(unix)]
 
 extern crate serialport;
@@ -8,12 +8,12 @@ use std::os::unix::prelude::*;
 use std::str;
 use std::time::Duration;
 
-use serialport::{SerialPort, TTYPort};
+use serialport::SerialPort;
 
 #[test]
 fn test_ttyport_pair() {
-    // FIXME: Create a mutex across all tests for using `TTYPort::pair()` as it's not threadsafe
-    let (mut master, mut slave) = TTYPort::pair().expect("Unable to create ptty pair");
+    // FIXME: Create a mutex across all tests for using `SerialPort::pair()` as it's not threadsafe
+    let (mut master, mut slave) = SerialPort::pair().expect("Unable to create ptty pair");
     master
         .set_timeout(Duration::from_millis(10))
         .expect("Unable to set timeout on the master");
@@ -70,8 +70,8 @@ fn test_ttyport_timeout() {
     let result_thread = result.clone();
 
     std::thread::spawn(move || {
-        // FIXME: Create a mutex across all tests for using `TTYPort::pair()` as it's not threadsafe
-        let (mut master, _slave) = TTYPort::pair().expect("Unable to create ptty pair");
+        // FIXME: Create a mutex across all tests for using `SerialPort::pair()` as it's not threadsafe
+        let (mut master, _slave) = SerialPort::pair().expect("Unable to create ptty pair");
         master.set_timeout(Duration::new(1, 0)).unwrap();
 
         let mut buffer = [0u8];
@@ -94,14 +94,14 @@ fn test_ttyport_timeout() {
 #[cfg(any(target_os = "ios", target_os = "macos"))]
 fn test_osx_pty_pair() {
     #![allow(unused_variables)]
-    let (mut master, slave) = TTYPort::pair().expect("Unable to create ptty pair");
+    let (mut master, slave) = SerialPort::pair().expect("Unable to create ptty pair");
     let (output_sink, output_stream) = std::sync::mpsc::sync_channel(1);
     let name = slave.name().unwrap();
 
     master.write_all("12".as_bytes()).expect("");
 
     let reader_thread = std::thread::spawn(move || {
-        let mut port = TTYPort::open(&serialport::new(&name, 0)).expect("unable to open");
+        let mut port = SerialPort::open(&serialport::new(&name, 0)).expect("unable to open");
         let mut buffer = [0u8; 2];
         let amount = port.read_exact(&mut buffer);
         output_sink
@@ -121,9 +121,9 @@ fn test_ttyport_set_standard_baud() {
     // `master` must be used here as Dropping it causes slave to be deleted by the OS.
     // TODO: Convert this to a statement-level attribute once
     //       https://github.com/rust-lang/rust/issues/15701 is on stable.
-    // FIXME: Create a mutex across all tests for using `TTYPort::pair()` as it's not threadsafe
+    // FIXME: Create a mutex across all tests for using `SerialPort::pair()` as it's not threadsafe
     #![allow(unused_variables)]
-    let (master, mut slave) = TTYPort::pair().expect("Unable to create ptty pair");
+    let (master, mut slave) = SerialPort::pair().expect("Unable to create ptty pair");
 
     slave.set_baud_rate(9600).unwrap();
     assert_eq!(slave.baud_rate().unwrap(), 9600);
@@ -147,9 +147,9 @@ fn test_ttyport_set_nonstandard_baud() {
     // `master` must be used here as Dropping it causes slave to be deleted by the OS.
     // TODO: Convert this to a statement-level attribute once
     //       https://github.com/rust-lang/rust/issues/15701 is on stable.
-    // FIXME: Create a mutex across all tests for using `TTYPort::pair()` as it's not threadsafe
+    // FIXME: Create a mutex across all tests for using `SerialPort::pair()` as it's not threadsafe
     #![allow(unused_variables)]
-    let (master, mut slave) = TTYPort::pair().expect("Unable to create ptty pair");
+    let (master, mut slave) = SerialPort::pair().expect("Unable to create ptty pair");
 
     slave.set_baud_rate(10000).unwrap();
     assert_eq!(slave.baud_rate().unwrap(), 10000);
