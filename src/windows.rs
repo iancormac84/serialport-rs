@@ -7,9 +7,7 @@ use std::convert::TryFrom;
 use std::time::Duration;
 
 #[cfg(windows)]
-use winapi::shared::minwindef::DWORD;
-#[cfg(windows)]
-use winapi::um::winbase::COMMTIMEOUTS;
+use windows_sys::Win32::Devices::Communication::COMMTIMEOUTS;
 
 use crate::Result;
 
@@ -59,24 +57,24 @@ impl From<COMMTIMEOUTS> for CommTimeouts {
 impl From<CommTimeouts> for COMMTIMEOUTS {
     fn from(timeouts: CommTimeouts) -> Self {
         COMMTIMEOUTS {
-            ReadIntervalTimeout: DWORD::try_from(timeouts.read_interval_timeout.as_millis())
-                .unwrap_or(DWORD::MAX),
-            ReadTotalTimeoutMultiplier: DWORD::try_from(
+            ReadIntervalTimeout: u32::try_from(timeouts.read_interval_timeout.as_millis())
+                .unwrap_or(u32::MAX),
+            ReadTotalTimeoutMultiplier: u32::try_from(
                 timeouts.read_total_timeout_multiplier.as_millis(),
             )
-            .unwrap_or(DWORD::MAX),
-            ReadTotalTimeoutConstant: DWORD::try_from(
+            .unwrap_or(u32::MAX),
+            ReadTotalTimeoutConstant: u32::try_from(
                 timeouts.read_total_timeout_constant.as_millis(),
             )
-            .unwrap_or(DWORD::MAX),
-            WriteTotalTimeoutMultiplier: DWORD::try_from(
+            .unwrap_or(u32::MAX),
+            WriteTotalTimeoutMultiplier: u32::try_from(
                 timeouts.write_total_timeout_multiplier.as_millis(),
             )
-            .unwrap_or(DWORD::MAX),
-            WriteTotalTimeoutConstant: DWORD::try_from(
+            .unwrap_or(u32::MAX),
+            WriteTotalTimeoutConstant: u32::try_from(
                 timeouts.write_total_timeout_constant.as_millis(),
             )
-            .unwrap_or(DWORD::MAX),
+            .unwrap_or(u32::MAX),
         }
     }
 }

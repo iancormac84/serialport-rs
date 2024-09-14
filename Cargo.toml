@@ -34,10 +34,17 @@ mach2 = "0.4.1"
 version = "0.59"
 features = [
     "Win32_Devices_DeviceAndDriverInstallation",
+    "Win32_Devices_Communication",
     "Win32_Foundation",
+    "Win32_Globalization",
     "Win32_Security",
+    "Win32_Storage_FileSystem",
+    "Win32_System_Diagnostics_Debug",
+    "Win32_System_SystemServices",
+    "Win32_System_IO",
     "Win32_System_Registry",
     "Win32_System_Threading",
+    "Win32_System_WindowsProgramming",
 ]
 
 [dependencies]

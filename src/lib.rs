@@ -37,6 +37,7 @@
 //! reading and 1 thread for writing. It is also possible to get separate SerialPort instances
 //! which have the same underlying serial device using [`try_clone`][SerialPort::try_clone()].
 
+#![allow(non_snake_case)]
 #![deny(
     missing_docs,
     missing_debug_implementations,

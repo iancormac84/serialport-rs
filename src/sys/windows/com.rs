@@ -3,12 +3,34 @@ use std::os::windows::prelude::*;
 use std::time::Duration;
 use std::{io, ptr};
 
-use crate::sys::windows::dcb;
+use crate::sys::windows::dcb::{self, Settings};
 use crate::sys::windows::event_cache::EventCache;
 use crate::windows::{CommTimeouts, SerialPortExt};
 use crate::{
     ClearBuffer, DataBits, Error, ErrorKind, FlowControl, Parity, Result, SerialPortBuilder,
     StopBits,
+};
+use windows_sys::Win32::{
+    Devices::Communication::{
+        ClearCommBreak, ClearCommError, EscapeCommFunction, GetCommModemStatus, GetCommState,
+        GetCommTimeouts, PurgeComm, SetCommBreak, SetCommTimeouts, CLRDTR, CLRRTS, COMMTIMEOUTS,
+        DCB, EVENPARITY, MS_CTS_ON, MS_DSR_ON, MS_RING_ON, MS_RLSD_ON, NOPARITY, ODDPARITY,
+        ONESTOPBIT, PURGE_RXABORT, PURGE_RXCLEAR, PURGE_TXABORT, PURGE_TXCLEAR, SETDTR, SETRTS,
+        TWOSTOPBITS,
+    },
+    Foundation::{
+        CloseHandle, DuplicateHandle, GetLastError, DUPLICATE_SAME_ACCESS, ERROR_IO_PENDING,
+        GENERIC_READ, GENERIC_WRITE, HANDLE, INVALID_HANDLE_VALUE,
+    },
+    Storage::FileSystem::{
+        CreateFileW, FlushFileBuffers, ReadFile, WriteFile, FILE_ATTRIBUTE_NORMAL,
+        FILE_FLAG_OVERLAPPED, OPEN_EXISTING,
+    },
+    System::{
+        SystemServices::MAXDWORD,
+        Threading::GetCurrentProcess,
+        IO::{GetOverlappedResult, OVERLAPPED},
+    },
 };
 
 /// A serial port implementation for Windows COM ports
@@ -71,14 +93,14 @@ impl SerialPort {
         // if one of the calls to `get_dcb()` or `set_dcb()` fails
         let mut com = SerialPort::open_from_raw_handle(handle as RawHandle);
 
-        let mut dcb = dcb::get_dcb(handle)?;
-        dcb::init(&mut dcb);
-        dcb::set_baud_rate(&mut dcb, builder.baud_rate);
-        dcb::set_data_bits(&mut dcb, builder.data_bits);
-        dcb::set_parity(&mut dcb, builder.parity);
-        dcb::set_stop_bits(&mut dcb, builder.stop_bits);
-        dcb::set_flow_control(&mut dcb, builder.flow_control);
-        dcb::set_dcb(handle, dcb)?;
+        let mut settings = Settings::from_handle(handle)?;
+        settings.init();
+        settings.set_baud_rate(builder.baud_rate);
+        settings.set_data_bits(builder.data_bits);
+        settings.set_parity(builder.parity);
+        settings.set_stop_bits(builder.stop_bits);
+        settings.set_flow_control(builder.flow_control);
+        dcb::set_dcb(handle, settings.dcb)?;
 
         com.set_timeout(builder.timeout)?;
         com.port_name = Some(builder.path.clone());
@@ -107,7 +129,7 @@ impl SerialPort {
                 process_handle,
                 &mut cloned_handle,
                 0,
-                TRUE,
+                1,
                 DUPLICATE_SAME_ACCESS,
             );
             if cloned_handle != INVALID_HANDLE_VALUE {
@@ -124,15 +146,15 @@ impl SerialPort {
         }
     }
 
-    fn escape_comm_function(&mut self, function: DWORD) -> Result<()> {
+    fn escape_comm_function(&mut self, function: u32) -> Result<()> {
         match unsafe { EscapeCommFunction(self.handle, function) } {
             0 => Err(super::error::last_os_error()),
             _ => Ok(()),
         }
     }
 
-    fn read_pin(&mut self, pin: DWORD) -> Result<bool> {
-        let mut status: DWORD = 0;
+    fn read_pin(&mut self, pin: u32) -> Result<bool> {
+        let mut status: u32 = 0;
 
         match unsafe { GetCommModemStatus(self.handle, &mut status) } {
             0 => Err(super::error::last_os_error()),
@@ -152,16 +174,16 @@ impl SerialPort {
         }
     }
 
-    fn timeout_constant(duration: Duration) -> DWORD {
+    fn timeout_constant(duration: Duration) -> u32 {
         let milliseconds = duration.as_millis();
         // In the way we are setting up COMMTIMEOUTS, a timeout_constant of MAXDWORD gets rejected.
         // Let's clamp the timeout constant for values of MAXDWORD and above. See remarks at
         // https://learn.microsoft.com/en-us/windows/win32/api/winbase/ns-winbase-commtimeouts.
         //
         // This effectively throws away accuracy for really long timeouts but at least preserves a
-        // long-ish timeout. But just casting to DWORD would result in presumably unexpected short
+        // long-ish timeout. But just casting to u32 would result in presumably unexpected short
         // and non-monotonic timeouts from cutting off the higher bits.
-        u128::min(milliseconds, MAXDWORD as u128 - 1) as DWORD
+        u128::min(milliseconds, MAXDWORD as u128 - 1) as u32
     }
 
     pub fn name(&self) -> Option<&str> {
@@ -223,14 +245,25 @@ impl SerialPort {
         self.read_pin(MS_RLSD_ON)
     }
 
+    pub fn get_settings(&self) -> Result<Settings> {
+        let mut dcb: DCB = unsafe { MaybeUninit::zeroed().assume_init() };
+        dcb.DCBlength = std::mem::size_of::<DCB>() as u32;
+
+        if unsafe { GetCommState(self.handle, &mut dcb) } != 0 {
+            Ok(Settings { dcb })
+        } else {
+            Err(super::error::last_os_error())
+        }
+    }
+
     pub fn baud_rate(&self) -> Result<u32> {
-        let dcb = dcb::get_dcb(self.handle)?;
-        Ok(dcb.BaudRate as u32)
+        let settings = self.get_settings()?;
+        Ok(settings.dcb.BaudRate as u32)
     }
 
     pub fn data_bits(&self) -> Result<DataBits> {
-        let dcb = dcb::get_dcb(self.handle)?;
-        match dcb.ByteSize {
+        let settings = self.get_settings()?;
+        match settings.dcb.ByteSize {
             5 => Ok(DataBits::Five),
             6 => Ok(DataBits::Six),
             7 => Ok(DataBits::Seven),
@@ -243,8 +276,8 @@ impl SerialPort {
     }
 
     pub fn parity(&self) -> Result<Parity> {
-        let dcb = dcb::get_dcb(self.handle)?;
-        match dcb.Parity {
+        let settings = self.get_settings()?;
+        match settings.dcb.Parity {
             ODDPARITY => Ok(Parity::Odd),
             EVENPARITY => Ok(Parity::Even),
             NOPARITY => Ok(Parity::None),
@@ -256,8 +289,8 @@ impl SerialPort {
     }
 
     pub fn stop_bits(&self) -> Result<StopBits> {
-        let dcb = dcb::get_dcb(self.handle)?;
-        match dcb.StopBits {
+        let settings = self.get_settings()?;
+        match settings.dcb.StopBits {
             TWOSTOPBITS => Ok(StopBits::Two),
             ONESTOPBIT => Ok(StopBits::One),
             _ => Err(Error::new(
@@ -268,10 +301,10 @@ impl SerialPort {
     }
 
     pub fn flow_control(&self) -> Result<FlowControl> {
-        let dcb = dcb::get_dcb(self.handle)?;
-        if dcb.fOutxCtsFlow() != 0 || dcb.fRtsControl() != 0 {
+        let settings = self.get_settings()?;
+        if settings.fOutxCtsFlow() != 0 || settings.fRtsControl() != 0 {
             Ok(FlowControl::Hardware)
-        } else if dcb.fOutX() != 0 || dcb.fInX() != 0 {
+        } else if settings.fOutX() != 0 || settings.fInX() != 0 {
             Ok(FlowControl::Software)
         } else {
             Ok(FlowControl::None)
@@ -279,37 +312,37 @@ impl SerialPort {
     }
 
     pub fn set_baud_rate(&mut self, baud_rate: u32) -> Result<()> {
-        let mut dcb = dcb::get_dcb(self.handle)?;
-        dcb::set_baud_rate(&mut dcb, baud_rate);
-        dcb::set_dcb(self.handle, dcb)
+        let mut settings = self.get_settings()?;
+        settings.set_baud_rate(baud_rate);
+        dcb::set_dcb(self.handle, settings.dcb)
     }
 
     pub fn set_data_bits(&mut self, data_bits: DataBits) -> Result<()> {
-        let mut dcb = dcb::get_dcb(self.handle)?;
-        dcb::set_data_bits(&mut dcb, data_bits);
-        dcb::set_dcb(self.handle, dcb)
+        let mut settings = self.get_settings()?;
+        settings.set_data_bits(data_bits);
+        dcb::set_dcb(self.handle, settings.dcb)
     }
 
     pub fn set_parity(&mut self, parity: Parity) -> Result<()> {
-        let mut dcb = dcb::get_dcb(self.handle)?;
-        dcb::set_parity(&mut dcb, parity);
-        dcb::set_dcb(self.handle, dcb)
+        let mut settings = self.get_settings()?;
+        settings.set_parity(parity);
+        dcb::set_dcb(self.handle, settings.dcb)
     }
 
     pub fn set_stop_bits(&mut self, stop_bits: StopBits) -> Result<()> {
-        let mut dcb = dcb::get_dcb(self.handle)?;
-        dcb::set_stop_bits(&mut dcb, stop_bits);
-        dcb::set_dcb(self.handle, dcb)
+        let mut settings = self.get_settings()?;
+        settings.set_stop_bits(stop_bits);
+        dcb::set_dcb(self.handle, settings.dcb)
     }
 
     pub fn set_flow_control(&mut self, flow_control: FlowControl) -> Result<()> {
-        let mut dcb = dcb::get_dcb(self.handle)?;
-        dcb::set_flow_control(&mut dcb, flow_control);
-        dcb::set_dcb(self.handle, dcb)
+        let mut settings = self.get_settings()?;
+        settings.set_flow_control(flow_control);
+        dcb::set_dcb(self.handle, settings.dcb)
     }
 
     pub fn bytes_to_read(&self) -> Result<u32> {
-        let mut errors: DWORD = 0;
+        let mut errors: u32 = 0;
         let mut comstat = MaybeUninit::uninit();
 
         if unsafe { ClearCommError(self.handle, &mut errors, comstat.as_mut_ptr()) != 0 } {
@@ -320,7 +353,7 @@ impl SerialPort {
     }
 
     pub fn bytes_to_write(&self) -> Result<u32> {
-        let mut errors: DWORD = 0;
+        let mut errors: u32 = 0;
         let mut comstat = MaybeUninit::uninit();
 
         if unsafe { ClearCommError(self.handle, &mut errors, comstat.as_mut_ptr()) != 0 } {
@@ -436,8 +469,8 @@ impl IntoRawHandle for crate::SerialPort {
 
 impl io::Read for &SerialPort {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        assert!(buf.len() <= DWORD::MAX as usize);
-        let mut len: DWORD = 0;
+        assert!(buf.len() <= u32::MAX as usize);
+        let mut len: u32 = 0;
 
         let read_event = self.read_event.take_or_create()?;
         let mut overlapped: OVERLAPPED = unsafe { MaybeUninit::zeroed().assume_init() };
@@ -446,18 +479,18 @@ impl io::Read for &SerialPort {
         match unsafe {
             ReadFile(
                 self.handle,
-                buf.as_mut_ptr() as LPVOID,
-                buf.len() as DWORD,
+                buf.as_mut_ptr(),
+                buf.len() as u32,
                 &mut len,
                 &mut overlapped,
             )
         } {
-            FALSE if unsafe { GetLastError() } == ERROR_IO_PENDING => {}
-            FALSE => return Err(io::Error::last_os_error()),
+            0 if unsafe { GetLastError() } == ERROR_IO_PENDING => {}
+            0 => return Err(io::Error::last_os_error()),
             _ => return Ok(len as usize),
         }
 
-        if unsafe { GetOverlappedResult(self.handle, &mut overlapped, &mut len, TRUE) } == FALSE {
+        if unsafe { GetOverlappedResult(self.handle, &mut overlapped, &mut len, 1) } == 0 {
             return Err(io::Error::last_os_error());
         }
         match len {
@@ -473,8 +506,8 @@ impl io::Read for &SerialPort {
 
 impl io::Write for &SerialPort {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        assert!(buf.len() <= DWORD::MAX as usize);
-        let mut len: DWORD = 0;
+        assert!(buf.len() <= u32::MAX as usize);
+        let mut len: u32 = 0;
 
         let write_event = self.write_event.take_or_create()?;
         let mut overlapped: OVERLAPPED = unsafe { MaybeUninit::zeroed().assume_init() };
@@ -483,18 +516,18 @@ impl io::Write for &SerialPort {
         match unsafe {
             WriteFile(
                 self.handle,
-                buf.as_ptr() as LPVOID,
-                buf.len() as DWORD,
+                buf.as_ptr(),
+                buf.len() as u32,
                 &mut len,
                 &mut overlapped,
             )
         } {
-            FALSE if unsafe { GetLastError() } == ERROR_IO_PENDING => {}
-            FALSE => return Err(io::Error::last_os_error()),
+            0 if unsafe { GetLastError() } == ERROR_IO_PENDING => {}
+            0 => return Err(io::Error::last_os_error()),
             _ => return Ok(len as usize),
         }
 
-        if unsafe { GetOverlappedResult(self.handle, &mut overlapped, &mut len, TRUE) } == FALSE {
+        if unsafe { GetOverlappedResult(self.handle, &mut overlapped, &mut len, 1) } == 0 {
             return Err(io::Error::last_os_error());
             // // WriteFile() may fail with ERROR_SEM_TIMEOUT, which is not
             // // io::ErrorKind::TimedOut prior to Rust 1.46, so create a custom
@@ -502,7 +535,7 @@ impl io::Write for &SerialPort {
             // // https://github.com/rust-lang/rust/pull/71756
             // let error = io::Error::last_os_error();
             // // TODO: wrap if clause in if_rust_version! { < 1.46 { ... }}
-            // if error.raw_os_error().unwrap() as DWORD == ERROR_SEM_TIMEOUT
+            // if error.raw_os_error().unwrap() as u32 == ERROR_SEM_TIMEOUT
             //     && error.kind() != io::ErrorKind::TimedOut
             // {
             //     return Err(io::Error::new(
@@ -533,7 +566,7 @@ impl io::Write for &SerialPort {
 impl SerialPortExt for SerialPort {
     fn comm_timeouts(&self) -> Result<CommTimeouts> {
         let mut timeouts: COMMTIMEOUTS = unsafe { MaybeUninit::zeroed().assume_init() };
-        if unsafe { GetCommTimeouts(self.handle, &mut timeouts) } == FALSE {
+        if unsafe { GetCommTimeouts(self.handle, &mut timeouts) } == 0 {
             return Err(super::error::last_os_error());
         }
         Ok(timeouts.into())
@@ -541,7 +574,7 @@ impl SerialPortExt for SerialPort {
 
     fn set_comm_timeouts(&self, timeouts: CommTimeouts) -> Result<()> {
         let mut timeouts: COMMTIMEOUTS = timeouts.into();
-        if unsafe { SetCommTimeouts(self.handle, &mut timeouts) } == FALSE {
+        if unsafe { SetCommTimeouts(self.handle, &mut timeouts) } == 0 {
             return Err(super::error::last_os_error());
         }
         Ok(())

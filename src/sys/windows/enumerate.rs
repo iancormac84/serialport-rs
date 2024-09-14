@@ -368,7 +368,7 @@ impl PortDevice {
             )
         };
         unsafe { RegCloseKey(hkey) };
-        if FAILED(err) {
+        if err < 0 {
             // failed to query registry for some reason. Return empty string as the failure case
             return String::new();
         }
@@ -444,7 +444,7 @@ fn get_registry_com_ports() -> HashSet<String> {
     // SAFETY: ffi, all inputs are correct
     let open_res =
         unsafe { RegOpenKeyExW(HKEY_LOCAL_MACHINE, key_ptr, 0, KEY_READ, &mut ports_key) };
-    if SUCCEEDED(open_res) {
+    if open_res >= 0 {
         let mut class_name_buff = [0u16; MAX_PATH as usize];
         let mut class_name_size = MAX_PATH as u32;
         let mut sub_key_count = 0;
@@ -475,7 +475,7 @@ fn get_registry_com_ports() -> HashSet<String> {
                 &mut last_write_time,
             )
         };
-        if SUCCEEDED(query_res) {
+        if query_res >= 0 {
             for idx in 0..num_key_values {
                 let mut val_name_buff = [0u16; MAX_PATH as usize];
                 let mut val_name_size = MAX_PATH;
@@ -497,7 +497,7 @@ fn get_registry_com_ports() -> HashSet<String> {
                         &mut byte_len,
                     )
                 };
-                if FAILED(res)
+                if res < 0
                     || value_type != REG_SZ // only valid for text values
                     || byte_len % 2 != 0 // out byte len should be a multiple of u16 size
                     || byte_len > buffer_byte_len
