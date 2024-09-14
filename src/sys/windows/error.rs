@@ -35,7 +35,7 @@ fn error_string(errnum: u32) -> String {
         let res = FormatMessageW(
             FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
             ptr::null_mut(),
-            errnum as u32,
+            errnum,
             0,
             buf.as_mut_ptr(),
             buf.len() as u32,

@@ -10,7 +10,7 @@ use windows_sys::Win32::{
         CR_SUCCESS, DICS_FLAG_GLOBAL, DIGCF_PRESENT, DIREG_DEV, HDEVINFO, MAX_DEVICE_ID_LEN,
         SPDRP_FRIENDLYNAME, SPDRP_HARDWAREID, SPDRP_MFG, SP_DEVINFO_DATA,
     },
-    Foundation::{FILETIME, INVALID_HANDLE_VALUE, MAX_PATH},
+    Foundation::{ERROR_SUCCESS, FILETIME, INVALID_HANDLE_VALUE, MAX_PATH},
     System::Registry::{
         RegCloseKey, RegEnumValueW, RegOpenKeyExW, RegQueryInfoKeyW, RegQueryValueExW,
         HKEY_LOCAL_MACHINE, KEY_READ, REG_SZ,
@@ -296,7 +296,7 @@ impl PortDevice {
         let res = unsafe {
             SetupDiGetDeviceInstanceIdW(
                 self.hdi,
-                &mut self.devinfo_data,
+                &self.devinfo_data,
                 result_buf.as_mut_ptr(),
                 working_buffer_len as u32,
                 &mut desired_result_len,
@@ -337,7 +337,7 @@ impl PortDevice {
         let hkey = unsafe {
             SetupDiOpenDevRegKey(
                 self.hdi,
-                &mut self.devinfo_data,
+                &self.devinfo_data,
                 DICS_FLAG_GLOBAL,
                 0,
                 DIREG_DEV,
@@ -368,7 +368,7 @@ impl PortDevice {
             )
         };
         unsafe { RegCloseKey(hkey) };
-        if err < 0 {
+        if err != ERROR_SUCCESS {
             // failed to query registry for some reason. Return empty string as the failure case
             return String::new();
         }
@@ -406,7 +406,7 @@ impl PortDevice {
         let res = unsafe {
             SetupDiGetDeviceRegistryPropertyW(
                 self.hdi,
-                &mut self.devinfo_data,
+                &self.devinfo_data,
                 property_id,
                 &mut value_type,
                 property_buf.as_mut_ptr() as *mut u8,
@@ -444,9 +444,9 @@ fn get_registry_com_ports() -> HashSet<String> {
     // SAFETY: ffi, all inputs are correct
     let open_res =
         unsafe { RegOpenKeyExW(HKEY_LOCAL_MACHINE, key_ptr, 0, KEY_READ, &mut ports_key) };
-    if open_res >= 0 {
+    if open_res == ERROR_SUCCESS {
         let mut class_name_buff = [0u16; MAX_PATH as usize];
-        let mut class_name_size = MAX_PATH as u32;
+        let mut class_name_size = MAX_PATH;
         let mut sub_key_count = 0;
         let mut largest_sub_key = 0;
         let mut largest_class_string = 0;
@@ -475,7 +475,7 @@ fn get_registry_com_ports() -> HashSet<String> {
                 &mut last_write_time,
             )
         };
-        if query_res >= 0 {
+        if query_res == ERROR_SUCCESS {
             for idx in 0..num_key_values {
                 let mut val_name_buff = [0u16; MAX_PATH as usize];
                 let mut val_name_size = MAX_PATH;
@@ -497,7 +497,7 @@ fn get_registry_com_ports() -> HashSet<String> {
                         &mut byte_len,
                     )
                 };
-                if res < 0
+                if res != ERROR_SUCCESS
                     || value_type != REG_SZ // only valid for text values
                     || byte_len % 2 != 0 // out byte len should be a multiple of u16 size
                     || byte_len > buffer_byte_len

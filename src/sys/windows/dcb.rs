@@ -16,11 +16,13 @@ macro_rules! BITFIELD {
     ]) => {
         impl $base {$(
             #[inline]
+            #[allow(dead_code)]
             pub fn $thing(&self) -> $fieldtype {
                 let size = std::mem::size_of::<$fieldtype>() * 8;
                 self.$inner.$field << (size - $r.end) >> (size - $r.end + $r.start)
             }
             #[inline]
+            #[allow(dead_code)]
             pub fn $set_thing(&mut self, val: $fieldtype) {
                 let mask = ((1 << ($r.end - $r.start)) - 1) << $r.start;
                 self.$inner.$field &= !mask;
@@ -82,28 +84,28 @@ impl Settings {
         self.dcb.EofChar = 26;
         // dcb.EvtChar
         // always true for communications resources
-        self.set_fBinary(1 as u32);
+        self.set_fBinary(1);
         // dcb.set_fParity()
         // dcb.set_fOutxCtsFlow()
         // serialport-rs doesn't support toggling DSR: so disable fOutxDsrFlow
-        self.set_fOutxDsrFlow(0 as u32);
+        self.set_fOutxDsrFlow(0);
         self.set_fDtrControl(DTR_CONTROL_DISABLE);
         // disable because fOutxDsrFlow is disabled as well
-        self.set_fDsrSensitivity(0 as u32);
+        self.set_fDsrSensitivity(0);
         // dcb.set_fTXContinueOnXoff()
         // dcb.set_fOutX()
         // dcb.set_fInX()
-        self.set_fErrorChar(0 as u32);
+        self.set_fErrorChar(0);
         // fNull: when set to TRUE null bytes are discarded when received.
         // null bytes won't be discarded by serialport-rs
-        self.set_fNull(0 as u32);
+        self.set_fNull(0);
         // dcb.set_fRtsControl()
         // serialport-rs does not handle the fAbortOnError behaviour, so we must make sure it's not enabled
-        self.set_fAbortOnError(0 as u32);
+        self.set_fAbortOnError(0);
     }
 
     pub fn set_baud_rate(&mut self, baud_rate: u32) {
-        self.dcb.BaudRate = baud_rate as u32;
+        self.dcb.BaudRate = baud_rate;
     }
 
     pub fn set_data_bits(&mut self, data_bits: DataBits) {
@@ -122,7 +124,7 @@ impl Settings {
             Parity::Even => EVENPARITY,
         };
 
-        self.set_fParity(if parity == Parity::None { 0 } else { 1 } as u32);
+        self.set_fParity(if parity == Parity::None { 0 } else { 1 });
     }
 
     pub fn set_stop_bits(&mut self, stop_bits: StopBits) {

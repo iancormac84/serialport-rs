@@ -187,7 +187,7 @@ impl SerialPort {
     }
 
     pub fn name(&self) -> Option<&str> {
-        self.port_name.as_ref().map(|s| &**s)
+        self.port_name.as_deref()
     }
 
     pub fn timeout(&self) -> Duration {
@@ -197,7 +197,7 @@ impl SerialPort {
     pub fn set_timeout(&mut self, timeout: Duration) -> Result<()> {
         let timeout_constant = Self::timeout_constant(timeout);
 
-        let mut timeouts = COMMTIMEOUTS {
+        let timeouts = COMMTIMEOUTS {
             ReadIntervalTimeout: MAXDWORD,
             ReadTotalTimeoutMultiplier: MAXDWORD,
             ReadTotalTimeoutConstant: timeout_constant,
@@ -205,7 +205,7 @@ impl SerialPort {
             WriteTotalTimeoutConstant: timeout_constant,
         };
 
-        if unsafe { SetCommTimeouts(self.handle, &mut timeouts) } == 0 {
+        if unsafe { SetCommTimeouts(self.handle, &timeouts) } == 0 {
             return Err(super::error::last_os_error());
         }
 
@@ -258,7 +258,7 @@ impl SerialPort {
 
     pub fn baud_rate(&self) -> Result<u32> {
         let settings = self.get_settings()?;
-        Ok(settings.dcb.BaudRate as u32)
+        Ok(settings.dcb.BaudRate)
     }
 
     pub fn data_bits(&self) -> Result<DataBits> {
@@ -490,11 +490,11 @@ impl io::Read for &SerialPort {
             _ => return Ok(len as usize),
         }
 
-        if unsafe { GetOverlappedResult(self.handle, &mut overlapped, &mut len, 1) } == 0 {
+        if unsafe { GetOverlappedResult(self.handle, &overlapped, &mut len, 1) } == 0 {
             return Err(io::Error::last_os_error());
         }
         match len {
-            0 if buf.len() == 0 => Ok(0),
+            0 if buf.len() as u32 == len => Ok(0),
             0 => Err(io::Error::new(
                 io::ErrorKind::TimedOut,
                 "ReadFile() timed out (0 bytes read)",
@@ -527,7 +527,7 @@ impl io::Write for &SerialPort {
             _ => return Ok(len as usize),
         }
 
-        if unsafe { GetOverlappedResult(self.handle, &mut overlapped, &mut len, 1) } == 0 {
+        if unsafe { GetOverlappedResult(self.handle, &overlapped, &mut len, 1) } == 0 {
             return Err(io::Error::last_os_error());
             // // WriteFile() may fail with ERROR_SEM_TIMEOUT, which is not
             // // io::ErrorKind::TimedOut prior to Rust 1.46, so create a custom
@@ -546,7 +546,7 @@ impl io::Write for &SerialPort {
             // return Err(error);
         }
         match len {
-            0 if buf.len() == 0 => Ok(0),
+            0 if buf.len() as u32 == len => Ok(0),
             0 => Err(io::Error::new(
                 io::ErrorKind::TimedOut,
                 "WriteFile() timed out (0 bytes written)",
@@ -573,8 +573,8 @@ impl SerialPortExt for SerialPort {
     }
 
     fn set_comm_timeouts(&self, timeouts: CommTimeouts) -> Result<()> {
-        let mut timeouts: COMMTIMEOUTS = timeouts.into();
-        if unsafe { SetCommTimeouts(self.handle, &mut timeouts) } == 0 {
+        let timeouts: COMMTIMEOUTS = timeouts.into();
+        if unsafe { SetCommTimeouts(self.handle, &timeouts) } == 0 {
             return Err(super::error::last_os_error());
         }
         Ok(())
