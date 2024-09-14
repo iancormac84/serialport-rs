@@ -4,11 +4,9 @@ use std::ptr;
 use crate::{Error, ErrorKind};
 use windows_sys::Win32::{
     Foundation::{GetLastError, ERROR_ACCESS_DENIED, ERROR_FILE_NOT_FOUND, ERROR_PATH_NOT_FOUND},
-    Globalization::LANG_SYSTEM_DEFAULT,
     System::Diagnostics::Debug::{
         FormatMessageW, FORMAT_MESSAGE_FROM_SYSTEM, FORMAT_MESSAGE_IGNORE_INSERTS,
     },
-    System::SystemServices::SUBLANG_SYS_DEFAULT,
 };
 
 pub fn last_os_error() -> Error {
@@ -31,10 +29,6 @@ fn errno() -> u32 {
 fn error_string(errnum: u32) -> String {
     #![allow(non_snake_case)]
 
-    // This value is calculated from the macro
-    // MAKELANGID(LANG_SYSTEM_DEFAULT, SUBLANG_SYS_DEFAULT)
-    let langId = MAKELANGID(LANG_SYSTEM_DEFAULT, SUBLANG_SYS_DEFAULT) as u32;
-
     let mut buf = [0; 2048];
 
     unsafe {
@@ -42,7 +36,7 @@ fn error_string(errnum: u32) -> String {
             FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
             ptr::null_mut(),
             errnum as u32,
-            langId as u32,
+            0,
             buf.as_mut_ptr(),
             buf.len() as u32,
             ptr::null_mut(),

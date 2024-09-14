@@ -409,7 +409,7 @@ impl PortDevice {
                 &mut self.devinfo_data,
                 property_id,
                 &mut value_type,
-                property_buf.as_mut_ptr(),
+                property_buf.as_mut_ptr() as *mut u8,
                 property_buf.len() as u32,
                 ptr::null_mut(),
             )

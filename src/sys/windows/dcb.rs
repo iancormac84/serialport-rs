@@ -78,7 +78,7 @@ impl Settings {
         // dcb.StopBits
         self.dcb.XonChar = 17;
         self.dcb.XoffChar = 19;
-        self.dcb.ErrorChar = '\0';
+        self.dcb.ErrorChar = 0;
         self.dcb.EofChar = 26;
         // dcb.EvtChar
         // always true for communications resources

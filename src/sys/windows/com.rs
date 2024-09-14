@@ -245,7 +245,7 @@ impl SerialPort {
         self.read_pin(MS_RLSD_ON)
     }
 
-    pub fn get_settings(&self) -> Result<Settings> {
+    fn get_settings(&self) -> Result<Settings> {
         let mut dcb: DCB = unsafe { MaybeUninit::zeroed().assume_init() };
         dcb.DCBlength = std::mem::size_of::<DCB>() as u32;
 
