@@ -3,20 +3,6 @@ use std::os::windows::prelude::*;
 use std::time::Duration;
 use std::{io, ptr};
 
-use winapi::shared::minwindef::*;
-use winapi::shared::winerror::ERROR_IO_PENDING;
-use winapi::um::commapi::*;
-use winapi::um::errhandlingapi::GetLastError;
-use winapi::um::fileapi::*;
-use winapi::um::handleapi::*;
-use winapi::um::ioapiset::GetOverlappedResult;
-use winapi::um::minwinbase::OVERLAPPED;
-use winapi::um::processthreadsapi::GetCurrentProcess;
-use winapi::um::winbase::*;
-use winapi::um::winnt::{
-    DUPLICATE_SAME_ACCESS, FILE_ATTRIBUTE_NORMAL, GENERIC_READ, GENERIC_WRITE, HANDLE, MAXDWORD,
-};
-
 use crate::sys::windows::dcb;
 use crate::sys::windows::event_cache::EventCache;
 use crate::windows::{CommTimeouts, SerialPortExt};

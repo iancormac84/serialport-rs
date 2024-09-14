@@ -4,18 +4,17 @@ use std::io;
 use std::ptr;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use winapi::shared::minwindef::*;
-use winapi::shared::ntdef::NULL;
-use winapi::um::handleapi::*;
-use winapi::um::synchapi::CreateEventW;
-use winapi::um::winnt::HANDLE;
+use windows_sys::Win32::{
+    Foundation::{CloseHandle, HANDLE},
+    System::Threading::CreateEventW,
+};
 
 /// Cache for a HANDLE to an event.
 #[derive(Debug)]
 pub struct EventCache {
-    /// A `HANDLE` to an Event, created with `CreateEventW`, or `NULL`. We use
-    /// `NULL` to represent a missing handle rather than `INVALID_HANDLE_VALUE`
-    /// because `CreateEventW` returns `NULL` rather than `INVALID_HANDLE_VALUE`
+    /// A `HANDLE` to an Event, created with `CreateEventW`, or `ptr::null_mut()`. We use
+    /// `ptr::null_mut()` to represent a missing handle rather than `INVALID_HANDLE_VALUE`
+    /// because `CreateEventW` returns `ptr::null_mut()` rather than `INVALID_HANDLE_VALUE`
     /// on failure.
     handle: AtomicUsize,
 }
@@ -24,7 +23,7 @@ impl EventCache {
     /// Create a new, empty cache.
     pub fn new() -> Self {
         EventCache {
-            handle: AtomicUsize::new(NULL as usize),
+            handle: AtomicUsize::new(ptr::null_mut::<isize>() as usize),
         }
     }
 
@@ -32,8 +31,10 @@ impl EventCache {
     /// Returns an error only when creating a new event handle fails.
     pub fn take_or_create(&self) -> io::Result<HandleGuard> {
         // Fast path: there is a handle, just take it and return it.
-        let existing = self.handle.swap(NULL as usize, Ordering::Relaxed) as HANDLE;
-        if existing != NULL {
+        let existing =
+            self.handle
+                .swap(ptr::null_mut::<isize>() as usize, Ordering::Relaxed) as HANDLE;
+        if !existing.is_null() {
             return Ok(HandleGuard {
                 cache: self,
                 handle: existing,
@@ -42,12 +43,14 @@ impl EventCache {
 
         // We can use auto-reset for both read and write because we'll have a different event
         // handle for every thread that's trying to read or write.
-        match unsafe { CreateEventW(ptr::null_mut(), FALSE, FALSE, ptr::null_mut()) } {
-            NULL => Err(io::Error::last_os_error()),
-            new_handle => Ok(HandleGuard {
+        let new_handle = unsafe { CreateEventW(ptr::null_mut(), 0, 0, ptr::null_mut()) };
+        if new_handle.is_null() {
+            Err(io::Error::last_os_error())
+        } else {
+            Ok(HandleGuard {
                 cache: self,
                 handle: new_handle,
-            }),
+            })
         }
     }
 
@@ -56,7 +59,7 @@ impl EventCache {
         if self
             .handle
             .compare_exchange_weak(
-                NULL as usize,
+                ptr::null_mut::<isize>() as usize,
                 handle as usize,
                 Ordering::Relaxed,
                 Ordering::Relaxed,
@@ -72,7 +75,7 @@ impl EventCache {
 impl Drop for EventCache {
     fn drop(&mut self) {
         let handle = (*self.handle.get_mut()) as HANDLE;
-        if handle != NULL {
+        if !handle.is_null() {
             unsafe { CloseHandle(handle) };
         }
     }

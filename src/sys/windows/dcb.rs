@@ -1,10 +1,4 @@
 use std::mem::MaybeUninit;
-use winapi::shared::minwindef::*;
-use winapi::um::commapi::*;
-use winapi::um::winbase::*;
-use winapi::um::winnt::HANDLE;
-
-use crate::{DataBits, FlowControl, Parity, Result, StopBits};
 
 pub(crate) fn get_dcb(handle: HANDLE) -> Result<DCB> {
     let mut dcb: DCB = unsafe { MaybeUninit::zeroed().assume_init() };
