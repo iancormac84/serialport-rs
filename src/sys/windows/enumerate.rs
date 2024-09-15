@@ -1,5 +1,4 @@
 use std::collections::HashSet;
-use std::os::raw::c_void;
 use std::{mem, ptr};
 use windows_sys::core::GUID;
 use windows_sys::Win32::{
@@ -201,7 +200,7 @@ impl PortDevices {
     // Ports class (given by `guid`).
     pub fn new(guid: &GUID) -> Self {
         PortDevices {
-            hdi: unsafe { SetupDiGetClassDevsW(guid, ptr::null(), ptr::null_mut(), DIGCF_PRESENT) },
+            hdi: unsafe { SetupDiGetClassDevsW(guid, ptr::null(), 0, DIGCF_PRESENT) },
             dev_idx: 0,
         }
     }
@@ -345,7 +344,7 @@ impl PortDevice {
             )
         };
 
-        if hkey as *mut c_void == INVALID_HANDLE_VALUE {
+        if hkey == INVALID_HANDLE_VALUE {
             // failed to open registry key. Return empty string as the failure case
             return String::new();
         }
@@ -439,7 +438,7 @@ fn get_registry_com_ports() -> HashSet<String> {
 
     let reg_key = as_utf16("HARDWARE\\DEVICEMAP\\SERIALCOMM");
     let key_ptr = reg_key.as_ptr();
-    let mut ports_key = std::ptr::null_mut();
+    let mut ports_key = 0;
 
     // SAFETY: ffi, all inputs are correct
     let open_res =

@@ -34,7 +34,7 @@ impl EventCache {
         let existing =
             self.handle
                 .swap(ptr::null_mut::<isize>() as usize, Ordering::Relaxed) as HANDLE;
-        if !existing.is_null() {
+        if existing != 0 {
             return Ok(HandleGuard {
                 cache: self,
                 handle: existing,
@@ -44,7 +44,7 @@ impl EventCache {
         // We can use auto-reset for both read and write because we'll have a different event
         // handle for every thread that's trying to read or write.
         let new_handle = unsafe { CreateEventW(ptr::null_mut(), 0, 0, ptr::null_mut()) };
-        if new_handle.is_null() {
+        if new_handle == 0 {
             Err(io::Error::last_os_error())
         } else {
             Ok(HandleGuard {
@@ -75,7 +75,7 @@ impl EventCache {
 impl Drop for EventCache {
     fn drop(&mut self) {
         let handle = (*self.handle.get_mut()) as HANDLE;
-        if !handle.is_null() {
+        if handle != 0 {
             unsafe { CloseHandle(handle) };
         }
     }
