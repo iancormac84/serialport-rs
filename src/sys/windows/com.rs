@@ -592,7 +592,6 @@ mod tests {
 
         for (i, d) in MONOTONIC_DURATIONS.iter().enumerate() {
             let next = SerialPort::timeout_constant(*d);
-            dbg!((i, d));
             assert!(
                 next >= last,
                 "{next} >= {last} failed for {d:?} at index {i}"
