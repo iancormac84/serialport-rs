@@ -39,6 +39,7 @@
 
 #![allow(non_snake_case)]
 #![deny(
+    clippy::dbg_macro,
     missing_docs,
     missing_debug_implementations,
     missing_copy_implementations
