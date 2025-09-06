@@ -52,18 +52,18 @@ for p in ports {
 ## Opening and Configuring a Port
 
 ```rust
-let port = SerialPort::builder(115_200)
+let port = SerialPort::builder("/dev/ttyUSB0", 115_200)
     .read_timeout(Duration::from_millis(10))
-    .open("/dev/ttyUSB0")
+    .open()
     .expect("Failed to open port");
 ```
 Some platforms expose additional functionality, which is accessed by importing the platform-specific
 extension trait.
 
 ```rust
-let port = SerialPort::builder(115_200)
+let port = SerialPort::builder("/dev/ttyUSB0", 115_200)
     .read_timeout(Duration::from_millis(10))
-    .open("/dev/ttyUSB0")
+    .open()
     .expect("Failed to open port");
 
 #[cfg(windows)]
@@ -139,7 +139,7 @@ import the platform-specific trait.
 use serialport::posix::{SerialPortExt, BreakDuration};
 use serialport::SerialPort;
 
-let port = SerialPort::builder(9600).open("/dev/ttyUSB0")?;
+let port = SerialPort::builder("/dev/ttyUSB0", 9600).open()?;
 port.send_break(BreakDuration::Short)?;
 ```
 
