@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use clap::{Arg, Command};
 
-use serialport::{DataBits, StopBits};
+use serialport::{DataBits, SerialPort, StopBits};
 
 fn main() {
     let matches = Command::new("Serialport Example - Heartbeat")
@@ -68,7 +68,7 @@ fn main() {
     let rate = matches.value_of("rate").unwrap().parse::<u32>().unwrap();
     let string = matches.value_of("string").unwrap();
 
-    let builder = serialport::new(port_name, baud_rate)
+    let builder = SerialPort::builder(port_name, baud_rate)
         .stop_bits(stop_bits)
         .data_bits(data_bits);
     println!("{:?}", &builder);

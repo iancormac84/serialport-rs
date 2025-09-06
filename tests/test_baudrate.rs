@@ -5,6 +5,7 @@ use config::{hw_config, HardwareConfig};
 use rstest::rstest;
 use rstest_reuse::{self, apply, template};
 use serialport::{ClearBuffer, SerialPort};
+use std::io::{Read, Write};
 use std::ops::Range;
 use std::time::Duration;
 
@@ -21,13 +22,13 @@ fn accepted_actual_baud_for(baud: u32) -> Range<u32> {
     baud.checked_sub(delta).unwrap()..baud.checked_add(delta).unwrap()
 }
 
-fn check_baud_rate(port: &dyn SerialPort, baud: u32) {
+fn check_baud_rate(port: &SerialPort, baud: u32) {
     let accepted = accepted_actual_baud_for(baud);
     let actual = port.baud_rate().unwrap();
     assert!(accepted.contains(&actual));
 }
 
-fn check_test_message(sender: &mut dyn SerialPort, receiver: &mut dyn SerialPort) {
+fn check_test_message(sender: &mut SerialPort, receiver: &mut SerialPort) {
     // Ignore any "residue" from previous tests.
     sender.clear(ClearBuffer::All).unwrap();
     receiver.clear(ClearBuffer::All).unwrap();
@@ -67,7 +68,7 @@ mod builder {
             .baud_rate(baud)
             .open()
             .unwrap();
-        check_baud_rate(port.as_ref(), baud);
+        check_baud_rate(&port, baud);
     }
 
     #[apply(non_standard_baud_rates)]
@@ -104,7 +105,7 @@ mod builder {
             .baud_rate(baud)
             .open()
             .unwrap();
-        check_baud_rate(port.as_ref(), baud);
+        check_baud_rate(&port, baud);
     }
 
     /// Transmits data back and forth as done by the hardware_check example.
@@ -122,8 +123,8 @@ mod builder {
             .open()
             .unwrap();
 
-        check_test_message(&mut *port1, &mut *port2);
-        check_test_message(&mut *port2, &mut *port1);
+        check_test_message(&mut port1, &mut port2);
+        check_test_message(&mut port2, &mut port1);
     }
 }
 
@@ -135,7 +136,7 @@ mod new {
     #[cfg_attr(not(feature = "hardware-tests"), ignore)]
     fn test_standard_baud_rate(hw_config: HardwareConfig, #[case] baud: u32) {
         let port = serialport::new(hw_config.port_1, baud).open().unwrap();
-        check_baud_rate(port.as_ref(), baud);
+        check_baud_rate(&port, baud);
     }
 
     #[apply(non_standard_baud_rates)]
@@ -166,7 +167,7 @@ mod new {
         #[case] baud: u32,
     ) {
         let port = serialport::new(hw_config.port_1, baud).open().unwrap();
-        check_baud_rate(port.as_ref(), baud);
+        check_baud_rate(&port, baud);
     }
 
     /// Transmits data back and forth as done by the hardware_check example.
@@ -182,8 +183,8 @@ mod new {
             .open()
             .unwrap();
 
-        check_test_message(&mut *port1, &mut *port2);
-        check_test_message(&mut *port2, &mut *port1);
+        check_test_message(&mut port1, &mut port2);
+        check_test_message(&mut port2, &mut port1);
     }
 }
 
@@ -197,10 +198,10 @@ mod set_baud {
         let mut port = serialport::new(hw_config.port_1, RESET_BAUD_RATE)
             .open()
             .unwrap();
-        check_baud_rate(port.as_ref(), RESET_BAUD_RATE);
+        check_baud_rate(&port, RESET_BAUD_RATE);
 
         port.set_baud_rate(baud).unwrap();
-        check_baud_rate(port.as_ref(), baud);
+        check_baud_rate(&port, baud);
     }
 
     #[apply(non_standard_baud_rates)]
@@ -218,10 +219,10 @@ mod set_baud {
         let mut port = serialport::new(hw_config.port_1, RESET_BAUD_RATE)
             .open()
             .unwrap();
-        check_baud_rate(port.as_ref(), RESET_BAUD_RATE);
+        check_baud_rate(&port, RESET_BAUD_RATE);
 
         assert!(port.set_baud_rate(baud).is_err());
-        check_baud_rate(port.as_ref(), RESET_BAUD_RATE);
+        check_baud_rate(&port, RESET_BAUD_RATE);
     }
 
     #[apply(non_standard_baud_rates)]
@@ -239,10 +240,10 @@ mod set_baud {
         let mut port = serialport::new(hw_config.port_1, RESET_BAUD_RATE)
             .open()
             .unwrap();
-        check_baud_rate(port.as_ref(), RESET_BAUD_RATE);
+        check_baud_rate(&port, RESET_BAUD_RATE);
 
         port.set_baud_rate(baud).unwrap();
-        check_baud_rate(port.as_ref(), baud);
+        check_baud_rate(&port, baud);
     }
 
     /// Transmits data back and forth as done by the hardware_check example.
@@ -261,7 +262,7 @@ mod set_baud {
         port1.set_baud_rate(baud).unwrap();
         port2.set_baud_rate(baud).unwrap();
 
-        check_test_message(&mut *port1, &mut *port2);
-        check_test_message(&mut *port2, &mut *port1);
+        check_test_message(&mut port1, &mut port2);
+        check_test_message(&mut port2, &mut port1);
     }
 }

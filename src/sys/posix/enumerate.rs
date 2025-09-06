@@ -519,7 +519,7 @@ cfg_if! {
                         let parent = d.parent();
                         if parent.is_some() || is_rfcomm(&d) {
                             if let Some(driver) = parent.as_ref().and_then(|d| d.driver()) {
-                                if driver == "serial8250" && crate::new(devnode, 9600).open().is_err() {
+                                if driver == "serial8250" && crate::SerialPort::open(devnode, 9600).is_err() {
                                     continue;
                                 }
                             }

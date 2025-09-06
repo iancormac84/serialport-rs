@@ -11,14 +11,16 @@
 //! To test this, have a physical or virtual loopback device connected as the
 //! only port in the system.
 
-use std::io::Write;
+use std::io::{Read, Write};
 use std::time::Duration;
 use std::{io, thread};
+
+use serialport::SerialPort;
 
 fn main() {
     // Open the first serialport available.
     let port_name = &serialport::available_ports().expect("No serial port")[0].port_name;
-    let mut port = serialport::new(port_name, 9600)
+    let mut port = SerialPort::builder(port_name, 9600)
         .open()
         .expect("Failed to open serial port");
 
